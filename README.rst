@@ -30,7 +30,6 @@ This driver depends on:
 
 * `Adafruit CircuitPython <https://github.com/adafruit/circuitpython>`_
 * `Bus Device <https://github.com/adafruit/Adafruit_CircuitPython_BusDevice>`_
-* `Register <https://github.com/adafruit/Adafruit_CircuitPython_Register>`_
 
 Please ensure all dependencies are available on the CircuitPython filesystem.
 This is easily achieved by downloading
@@ -94,7 +93,18 @@ Usage Example
 
 .. code-block:: python
 
+    import time
+    import board
     import adafruit_sen6x
+
+    i2c = board.I2C()
+    sensor = adafruit_sen6x.SEN66(i2c)
+    sensor.start_measurement()
+    time.sleep(2)
+    if sensor.data_ready:
+        data = sensor.all_measurements()
+        print(data)
+    time.sleep(2)
 
 Documentation
 =============

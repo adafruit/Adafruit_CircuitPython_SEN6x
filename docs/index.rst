@@ -24,14 +24,12 @@ Table of Contents
 .. toctree::
     :caption: Tutorials
 
-.. todo:: Add any Learn guide links here. If there are none, then simply delete this todo and leave
-    the toctree above for use later.
+    Learn Guide <https://learn.adafruit.com/adafruit-sen6x-breakout>
 
 .. toctree::
     :caption: Related Products
 
-.. todo:: Add any product links here. If there are none, then simply delete this todo and leave
-    the toctree above for use later.
+    Adafruit SEN6x Breakout for Sensirion SEN66 - STEMMA QT / Qwiic <https://www.adafruit.com/product/6331>
 
 .. toctree::
     :caption: Other Links
