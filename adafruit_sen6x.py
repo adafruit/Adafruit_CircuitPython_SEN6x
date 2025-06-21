@@ -264,18 +264,20 @@ class SEN6x:
             data: Optional list of 16-bit values to write
             execution_time: Time to wait after command (seconds)
         """
+
+        buffer = struct.pack(">H", command)
         with self.i2c_device as i2c:
             # Write command (MSB first)
-            i2c.write(struct.pack(">H", command))
-
-            # Write data if provided
-            if data is not None:
+            if data is None:
+                i2c.write(buffer)
+            else:
                 for value in data:
                     # Pack 16-bit value
                     value_bytes = struct.pack(">H", value)
                     # Calculate and append CRC
                     crc = self._crc8(value_bytes)
-                    i2c.write(value_bytes + bytes([crc]))
+                    buffer += value_bytes + bytes([crc])
+                i2c.write(buffer)
 
         # Wait for command execution
         time.sleep(execution_time)
