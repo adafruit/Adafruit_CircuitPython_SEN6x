@@ -52,26 +52,26 @@ while True:
 
         # Display values (None = sensor still initializing)
         print(
-            f"Temperature: {data["temperature"]:.1f}°C"
+            f"Temperature: {data['temperature']:.1f}°C"
             if data["temperature"]
             else "Temperature: initializing..."
         )
         print(
-            f"Humidity: {data["humidity"]:.1f}%"
+            f"Humidity: {data['humidity']:.1f}%"
             if data["humidity"]
             else "Humidity: initializing..."
         )
-        print(f"PM2.5: {data["pm2_5"]:.1f} µg/m³" if data["pm2_5"] else "PM2.5: initializing...")
+        print(f"PM2.5: {data['pm2_5']:.1f} µg/m³" if data["pm2_5"] else "PM2.5: initializing...")
         print(
-            f"VOC Index: {data["voc_index"]:.1f}"
+            f"VOC Index: {data['voc_index']:.1f}"
             if data["voc_index"]
             else "VOC Index: initializing..."
         )
         print(
-            f"NOx Index: {data["nox_index"]:.1f}"
+            f"NOx Index: {data['nox_index']:.1f}"
             if data["nox_index"]
             else "NOx Index: initializing..."
         )
-        print(f"CO2: {data["co2"]} ppm" if data["co2"] else "CO2: initializing...")
+        print(f"CO2: {data['co2']} ppm" if data["co2"] else "CO2: initializing...")
         print("-" * 40)
     time.sleep(2)
