@@ -562,8 +562,8 @@ class SEN66(SEN6x):  # noqa: PLR0904
                 - pm10: PM10 concentration (µg/m³) or None if unknown
                 - humidity: Relative humidity (%) or None if unknown
                 - temperature: Temperature (°C) or None if unknown
-                - voc_index: VOC index (0.1-50.0) or None if unknown
-                - nox_index: NOx index (0.1-50.0) or None if unknown
+                - voc_index: VOC index (1.0-500.0) or None if unknown
+                - nox_index: NOx index (1.0-500.0) or None if unknown
                 - co2: CO2 concentration (ppm) or None if unknown
 
         Raises:
@@ -1107,13 +1107,13 @@ class SEN66(SEN6x):  # noqa: PLR0904
 
     @property
     def voc_index(self) -> Optional[float]:
-        """VOC index (0.1-50.0)"""
+        """VOC index (1.0-500.0)"""
         self.all_measurements()
         return self._measurement_data["voc_index"] if self._measurement_data else None
 
     @property
     def nox_index(self) -> Optional[float]:
-        """NOx index (0.1-50.0)"""
+        """NOx index (1.0-500.0)"""
         self.all_measurements()
         return self._measurement_data["nox_index"] if self._measurement_data else None
 
