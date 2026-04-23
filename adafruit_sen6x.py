@@ -330,7 +330,7 @@ class SEN6x:
                 if crc & 0x80:
                     crc = (crc << 1) ^ 0x31
                 else:
-                    crc = crc << 1
+                    crc <<= 1
                 crc &= 0xFF
         return crc
 
@@ -709,8 +709,8 @@ class SEN66(SEN6x):  # noqa: PLR0904
         slope_scaled = int(slope * 10000)
 
         # Convert signed to unsigned for I2C transmission
-        offset_scaled = offset_scaled & 0xFFFF
-        slope_scaled = slope_scaled & 0xFFFF
+        offset_scaled &= 0xFFFF
+        slope_scaled &= 0xFFFF
 
         data = [offset_scaled, slope_scaled, time_constant, slot]
         self._write_command(_TEMP_OFFSET, data=data, execution_time=_TIME_STANDARD)
