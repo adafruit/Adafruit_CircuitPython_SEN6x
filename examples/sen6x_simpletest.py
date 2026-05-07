@@ -14,7 +14,7 @@ import adafruit_sen6x
 i2c = board.I2C()
 
 # Initialize the sensor:
-sensor = adafruit_sen6x.SEN66(i2c) # SEN66 sensors
+sensor = adafruit_sen6x.SEN66(i2c)  # SEN66 sensors
 # sensor = adafruit_sen6x.SEN63C(i2c) # SEN63C sensors
 
 # Read sensor info
@@ -64,7 +64,7 @@ while True:
             else "Humidity: initializing..."
         )
         print(f"PM2.5: {data['pm2_5']:.1f} µg/m³" if data["pm2_5"] else "PM2.5: initializing...")
-        try: # if sensor does not have VOC/NOx readings, skip
+        try:  # if sensor does not have VOC/NOx readings, skip
             print(
                 f"VOC Index: {data['voc_index']:.1f}"
                 if data["voc_index"]

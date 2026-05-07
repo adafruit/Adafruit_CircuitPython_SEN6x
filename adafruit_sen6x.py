@@ -249,7 +249,7 @@ class DeviceStatus:
         return "Status: " + ", ".join(status_items)
 
 
-class SEN6x:
+class SEN6x:  # noqa: PLR0904
     """Base class for Sensirion SEN6x environmental sensors"""
 
     def __init__(self, i2c: I2C, address: int = SEN6X_I2C_ADDRESS) -> None:
