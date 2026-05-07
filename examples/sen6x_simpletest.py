@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Example usage:
+# Simpletest for the SEN6x Driver
+# Uncomment the init for your SEN6x sensor
 import time
 
 import board
@@ -12,8 +13,9 @@ import adafruit_sen6x
 # Initialize I2C
 i2c = board.I2C()
 
-# Create SEN66 instance
-sensor = adafruit_sen6x.SEN66(i2c)
+# Initialize the sensor:
+sensor = adafruit_sen6x.SEN66(i2c) # SEN66 sensors
+# sensor = adafruit_sen6x.SEN63C(i2c) # SEN63C sensors
 
 # Read sensor info
 print(f"Product: {sensor.product_name}")
@@ -62,16 +64,19 @@ while True:
             else "Humidity: initializing..."
         )
         print(f"PM2.5: {data['pm2_5']:.1f} µg/m³" if data["pm2_5"] else "PM2.5: initializing...")
-        print(
-            f"VOC Index: {data['voc_index']:.1f}"
-            if data["voc_index"]
-            else "VOC Index: initializing..."
-        )
-        print(
-            f"NOx Index: {data['nox_index']:.1f}"
-            if data["nox_index"]
-            else "NOx Index: initializing..."
-        )
+        try: # if sensor does not have VOC/NOx readings, skip
+            print(
+                f"VOC Index: {data['voc_index']:.1f}"
+                if data["voc_index"]
+                else "VOC Index: initializing..."
+            )
+            print(
+                f"NOx Index: {data['nox_index']:.1f}"
+                if data["nox_index"]
+                else "NOx Index: initializing..."
+            )
+        except KeyError:
+            pass
         print(f"CO2: {data['co2']} ppm" if data["co2"] else "CO2: initializing...")
         print("-" * 40)
     time.sleep(2)

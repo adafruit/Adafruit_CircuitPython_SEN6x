@@ -78,6 +78,13 @@ _SEN66_READ_MEASUREMENT = const(0x0300)  # Read all measurements
 _SEN66_READ_RAW_VALUES = const(0x0405)  # Read raw values
 _READ_NUMBER_CONCENTRATION = const(0x0316)
 
+# SEN63C-specific commands
+_SEN63C_READ_MEASUREMENT = const(0x0471)  # Read all measurements
+_SEN63C_READ_RAW_VALUES = const(0x0492)  # Read raw values
+
+# Activate SHT heater
+_ACTIVATE_SHT_HEATER = const(0x6765)
+
 # Command execution times (in seconds)
 _TIME_START_MEASUREMENT = const(0.050)  # 50ms
 _TIME_STOP_MEASUREMENT = const(1.000)  # 1000ms
@@ -250,6 +257,8 @@ class SEN6x:
         self._serial_number: Optional[str] = None
         self._product_name: Optional[str] = None
         self._measurement_started: bool = False
+        self._measurement_data: Optional[Dict[str, Optional[float]]] = None
+        self._measurement_time: Optional[float] = None
 
         # Allow sensor to complete startup
         time.sleep(_SENSOR_STARTUP_TIME)
@@ -538,125 +547,6 @@ class SEN6x:
 
         return errors
 
-
-class SEN66(SEN6x):  # noqa: PLR0904
-    """Driver for SEN66 sensor - measures PM, VOC, NOx, CO2, RH, and Temperature"""
-
-    def __init__(self, i2c: I2C, address: int = SEN6X_I2C_ADDRESS) -> None:
-        super().__init__(i2c, address)
-        self._measurement_data: Optional[Dict[str, Optional[float]]] = None
-        self._measurement_time: Optional[float] = None
-
-    def all_measurements(self) -> Dict[str, Optional[float]]:
-        """All measurement values from SEN66
-
-        Must be called when sensor is in measurement mode and data is ready.
-        Note: CO2 values will be 0xFFFF for first 5-6 seconds after measurement start.
-        Note: NOx values will be 0x7FFF for first 10-11 seconds after power-on/reset.
-
-        Returns:
-            dict: Dictionary containing:
-                - pm1_0: PM1.0 concentration (µg/m³) or None if unknown
-                - pm2_5: PM2.5 concentration (µg/m³) or None if unknown
-                - pm4_0: PM4.0 concentration (µg/m³) or None if unknown
-                - pm10: PM10 concentration (µg/m³) or None if unknown
-                - humidity: Relative humidity (%) or None if unknown
-                - temperature: Temperature (°C) or None if unknown
-                - voc_index: VOC index (1.0-500.0) or None if unknown
-                - nox_index: NOx index (1.0-500.0) or None if unknown
-                - co2: CO2 concentration (ppm) or None if unknown
-
-        Raises:
-            RuntimeError: If sensor is not in measurement mode
-        """
-        if not self._measurement_started:
-            raise RuntimeError(
-                "Sensor must be in measurement mode. Call start_measurement() first."
-            )
-
-        self._write_command(_SEN66_READ_MEASUREMENT)
-
-        # SEN66 returns 9 values (9 words) - includes CO2
-        data = self._read_data(9, execution_time=_TIME_READ_MEASUREMENT)
-
-        # Scale factors from datasheet
-        pm_scale = 10.0
-        temp_scale = 200.0
-        humidity_scale = 100.0
-        voc_nox_scale = 10.0
-
-        # Track measurement time for startup detection
-        if self._measurement_time is None:
-            self._measurement_time = time.monotonic()
-
-        # Process PM values (uint16, 0xFFFF = unknown)
-        pm1_0: Optional[float] = None if data[0] == _UNKNOWN_VALUE else data[0] / pm_scale
-        pm2_5: Optional[float] = None if data[1] == _UNKNOWN_VALUE else data[1] / pm_scale
-        pm4_0: Optional[float] = None if data[2] == _UNKNOWN_VALUE else data[2] / pm_scale
-        pm10: Optional[float] = None if data[3] == _UNKNOWN_VALUE else data[3] / pm_scale
-
-        # Process RH&T values (int16, 0x7FFF = unknown)
-        humidity: Optional[float] = None if data[4] == _UNKNOWN_VALUE else data[4] / humidity_scale
-        temperature: Optional[float] = None if data[5] == _UNKNOWN_VALUE else data[5] / temp_scale
-
-        # Process VOC/NOx indices (int16, 0x7FFF = unknown)
-        voc_index: Optional[float] = None if data[6] == _UNKNOWN_VALUE else data[6] / voc_nox_scale
-        nox_index: Optional[float] = None if data[7] == _UNKNOWN_VALUE else data[7] / voc_nox_scale
-
-        # Process CO2 (uint16, 0xFFFF = unknown)
-        co2: Optional[float] = None if data[8] == _UNKNOWN_VALUE else float(data[8])
-
-        self._measurement_data = {
-            "pm1_0": pm1_0,
-            "pm2_5": pm2_5,
-            "pm4_0": pm4_0,
-            "pm10": pm10,
-            "humidity": humidity,
-            "temperature": temperature,
-            "voc_index": voc_index,
-            "nox_index": nox_index,
-            "co2": co2,
-        }
-
-        return self._measurement_data
-
-    def _check_measurements(self) -> None:
-        """Ensure measurements have been read"""
-        if self._measurement_data is None:
-            self._measurement_data = self.all_measurements()
-
-    def raw_values(self) -> Dict[str, Optional[float]]:
-        """Raw sensor values from SEN66
-
-        Returns raw sensor readings without index calculations.
-
-        Returns:
-            dict: Dictionary containing:
-                - raw_humidity: Raw humidity (%)
-                - raw_temperature: Raw temperature (°C)
-                - raw_voc: Raw VOC ticks (no scale)
-                - raw_nox: Raw NOx ticks (no scale)
-                - raw_co2: Raw CO2 concentration (ppm, updated every 5s)
-        """
-        if not self._measurement_started:
-            raise RuntimeError(
-                "Sensor must be in measurement mode. Call start_measurement() first."
-            )
-
-        self._write_command(_SEN66_READ_RAW_VALUES)
-        data = self._read_data(5, execution_time=_TIME_READ_MEASUREMENT)
-
-        temp_scale = 200.0
-        humidity_scale = 100.0
-
-        return {
-            "raw_humidity": None if data[0] == _UNKNOWN_VALUE else data[0] / humidity_scale,
-            "raw_temperature": None if data[1] == _UNKNOWN_VALUE else data[1] / temp_scale,
-            "raw_voc": None if data[2] == _UNKNOWN_VALUE else float(data[2]),
-            "raw_nox": None if data[3] == _UNKNOWN_VALUE else float(data[3]),
-            "raw_co2": None if data[4] == _UNKNOWN_VALUE else float(data[4]),
-        }
-
     def number_concentration(self) -> Dict[str, Optional[float]]:
         """Particle number concentration values
 
@@ -895,6 +785,194 @@ class SEN66(SEN6x):  # noqa: PLR0904
 
         self._write_command(_SENSOR_ALTITUDE, data=[altitude_m], execution_time=_TIME_STANDARD)
 
+    def activate_sht_heater(self) -> None:
+        """Activate the SHT sensor heater to reverse humidity creep
+
+        Raises:
+            RuntimeError: If sensor is currently measuring
+        """
+        if self._measurement_started:
+            raise RuntimeError(
+                "Cannot activate SHT heater while measuring. Call stop_measurement() first."
+            )
+
+        self._write_command(_ACTIVATE_SHT_HEATER, execution_time=_TIME_STANDARD)
+
+    @property
+    def temperature(self) -> Optional[float]:
+        """Temperature in Celsius"""
+        self.all_measurements()
+        return self._measurement_data["temperature"] if self._measurement_data else None
+
+    @property
+    def humidity(self) -> Optional[float]:
+        """Relative humidity in percent"""
+        self.all_measurements()
+        return self._measurement_data["humidity"] if self._measurement_data else None
+
+    @property
+    def pm1_0(self) -> Optional[float]:
+        """PM1.0 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm1_0"] if self._measurement_data else None
+
+    @property
+    def pm2_5(self) -> Optional[float]:
+        """PM2.5 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm2_5"] if self._measurement_data else None
+
+    @property
+    def pm4_0(self) -> Optional[float]:
+        """PM4.0 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm4_0"] if self._measurement_data else None
+
+    @property
+    def pm10(self) -> Optional[float]:
+        """PM10 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm10"] if self._measurement_data else None
+
+    @property
+    def co2(self) -> Optional[float]:
+        """CO2 concentration in ppm
+
+        Applies to: SEN63C, SEN66, SEN69C
+        """
+        self.all_measurements()
+        return self._measurement_data.get("co2") if self._measurement_data else None
+
+    @property
+    def voc_index(self) -> Optional[float]:
+        """VOC index (1.0-500.0)
+
+        Applies to: SEN65, SEN66, SEN68, SEN69C
+        """
+        self.all_measurements()
+        return self._measurement_data.get("voc_index") if self._measurement_data else None
+
+    @property
+    def nox_index(self) -> Optional[float]:
+        """NOx index (1.0-500.0)
+
+        Applies to: SEN65, SEN66, SEN68, SEN69C
+        """
+        self.all_measurements()
+        return self._measurement_data.get("nox_index") if self._measurement_data else None
+
+
+class SEN66(SEN6x):  # noqa: PLR0904
+    """Driver for SEN66 sensor - measures PM, VOC, NOx, CO2, RH, and Temperature"""
+
+    def all_measurements(self) -> Dict[str, Optional[float]]:
+        """All measurement values from SEN66
+
+        Must be called when sensor is in measurement mode and data is ready.
+        Note: CO2 values will be 0xFFFF for first 5-6 seconds after measurement start.
+        Note: NOx values will be 0x7FFF for first 10-11 seconds after power-on/reset.
+
+        Returns:
+            dict:
+                - pm1_0: PM1.0 concentration (µg/m³) or None if unknown
+                - pm2_5: PM2.5 concentration (µg/m³) or None if unknown
+                - pm4_0: PM4.0 concentration (µg/m³) or None if unknown
+                - pm10: PM10 concentration (µg/m³) or None if unknown
+                - humidity: Relative humidity (%) or None if unknown
+                - temperature: Temperature (°C) or None if unknown
+                - voc_index: VOC index (1.0-500.0) or None if unknown
+                - nox_index: NOx index (1.0-500.0) or None if unknown
+                - co2: CO2 concentration (ppm) or None if unknown
+
+        Raises:
+            RuntimeError: If sensor is not in measurement mode
+        """
+        if not self._measurement_started:
+            raise RuntimeError(
+                "Sensor must be in measurement mode. Call start_measurement() first."
+            )
+
+        self._write_command(_SEN66_READ_MEASUREMENT)
+
+        # SEN66 returns 9 values (9 words) - includes CO2
+        data = self._read_data(9, execution_time=_TIME_READ_MEASUREMENT)
+
+        # Scale factors from datasheet
+        pm_scale = 10.0
+        temp_scale = 200.0
+        humidity_scale = 100.0
+        voc_nox_scale = 10.0
+
+        # Track measurement time for startup detection
+        if self._measurement_time is None:
+            self._measurement_time = time.monotonic()
+
+        # Process PM values (uint16, 0xFFFF = unknown)
+        pm1_0: Optional[float] = None if data[0] == _UNKNOWN_VALUE else data[0] / pm_scale
+        pm2_5: Optional[float] = None if data[1] == _UNKNOWN_VALUE else data[1] / pm_scale
+        pm4_0: Optional[float] = None if data[2] == _UNKNOWN_VALUE else data[2] / pm_scale
+        pm10: Optional[float] = None if data[3] == _UNKNOWN_VALUE else data[3] / pm_scale
+
+        # Process RH&T values (int16, 0x7FFF = unknown)
+        humidity: Optional[float] = None if data[4] == _UNKNOWN_VALUE else data[4] / humidity_scale
+        temperature: Optional[float] = None if data[5] == _UNKNOWN_VALUE else data[5] / temp_scale
+
+        # Process VOC/NOx indices (int16, 0x7FFF = unknown)
+        voc_index: Optional[float] = None if data[6] == _UNKNOWN_VALUE else data[6] / voc_nox_scale
+        nox_index: Optional[float] = None if data[7] == _UNKNOWN_VALUE else data[7] / voc_nox_scale
+
+        # Process CO2 (uint16, 0xFFFF = unknown)
+        co2: Optional[float] = None if data[8] == _UNKNOWN_VALUE else float(data[8])
+
+        self._measurement_data = {
+            "pm1_0": pm1_0,
+            "pm2_5": pm2_5,
+            "pm4_0": pm4_0,
+            "pm10": pm10,
+            "humidity": humidity,
+            "temperature": temperature,
+            "voc_index": voc_index,
+            "nox_index": nox_index,
+            "co2": co2,
+        }
+
+        return self._measurement_data
+
+    def _check_measurements(self) -> None:
+        """Ensure measurements have been read"""
+        if self._measurement_data is None:
+            self._measurement_data = self.all_measurements()
+
+    def raw_values(self) -> Dict[str, Optional[float]]:
+        """Raw sensor values from SEN66
+
+        Returns:
+            dict:
+                - raw_humidity: Raw humidity (%)
+                - raw_temperature: Raw temperature (°C)
+                - raw_voc: Raw VOC ticks (no scale)
+                - raw_nox: Raw NOx ticks (no scale)
+                - raw_co2: Raw CO2 concentration (ppm, updated every 5s)
+        """
+        if not self._measurement_started:
+            raise RuntimeError(
+                "Sensor must be in measurement mode. Call start_measurement() first."
+            )
+
+        self._write_command(_SEN66_READ_RAW_VALUES)
+        data = self._read_data(5, execution_time=_TIME_READ_MEASUREMENT)
+
+        temp_scale = 200.0
+        humidity_scale = 100.0
+
+        return {
+            "raw_humidity": None if data[0] == _UNKNOWN_VALUE else data[0] / humidity_scale,
+            "raw_temperature": None if data[1] == _UNKNOWN_VALUE else data[1] / temp_scale,
+            "raw_voc": None if data[2] == _UNKNOWN_VALUE else float(data[2]),
+            "raw_nox": None if data[3] == _UNKNOWN_VALUE else float(data[3]),
+            "raw_co2": None if data[4] == _UNKNOWN_VALUE else float(data[4]),
+        }
+
     @property
     def voc_algorithm_state(self) -> bytes:
         """VOC algorithm state for backup/restore
@@ -1087,38 +1165,98 @@ class SEN66(SEN6x):  # noqa: PLR0904
         ]
         self._write_command(_NOX_TUNING, data=data, execution_time=_TIME_STANDARD)
 
-    @property
-    def temperature(self) -> Optional[float]:
-        """Temperature in Celsius"""
-        self.all_measurements()
-        return self._measurement_data["temperature"] if self._measurement_data else None
 
-    @property
-    def humidity(self) -> Optional[float]:
-        """Relative humidity in percent"""
-        self.all_measurements()
-        return self._measurement_data["humidity"] if self._measurement_data else None
+class SEN63C(SEN6x):
+    """Driver for SEN63C sensor - measures PM, CO2, RH, and Temperature
 
-    @property
-    def pm2_5(self) -> Optional[float]:
-        """PM2.5 concentration in µg/m³"""
-        self.all_measurements()
-        return self._measurement_data["pm2_5"] if self._measurement_data else None
+    Note: The CO2 sensor requires a 24-second conditioning period after starting
+    a measurement. During this time, CO2 values will be reported as unknown (None).
+    """
 
-    @property
-    def voc_index(self) -> Optional[float]:
-        """VOC index (1.0-500.0)"""
-        self.all_measurements()
-        return self._measurement_data["voc_index"] if self._measurement_data else None
+    def all_measurements(self) -> Dict[str, Optional[float]]:
+        """All measurement values from SEN63C
 
-    @property
-    def nox_index(self) -> Optional[float]:
-        """NOx index (1.0-500.0)"""
-        self.all_measurements()
-        return self._measurement_data["nox_index"] if self._measurement_data else None
+        Must be called when sensor is in measurement mode and data is ready.
+        Note: CO2 values will be unknown (None) for the first 22-24 seconds
+        after starting a measurement due to CO2 sensor conditioning.
 
-    @property
-    def co2(self) -> Optional[float]:
-        """CO2 concentration in ppm"""
-        self.all_measurements()
-        return self._measurement_data["co2"] if self._measurement_data else None
+        Returns:
+            dict:
+                - pm1_0: PM1.0 concentration (µg/m³) or None if unknown
+                - pm2_5: PM2.5 concentration (µg/m³) or None if unknown
+                - pm4_0: PM4.0 concentration (µg/m³) or None if unknown
+                - pm10: PM10 concentration (µg/m³) or None if unknown
+                - humidity: Relative humidity (%) or None if unknown
+                - temperature: Temperature (°C) or None if unknown
+                - co2: CO2 concentration (ppm) or None if unknown
+
+        Raises:
+            RuntimeError: If sensor is not in measurement mode
+        """
+        if not self._measurement_started:
+            raise RuntimeError(
+                "Sensor must be in measurement mode. Call start_measurement() first."
+            )
+
+        self._write_command(_SEN63C_READ_MEASUREMENT)
+
+        # SEN63C returns 7 values (7 words): PM1.0, PM2.5, PM4.0, PM10, RH, T, CO2
+        data = self._read_data(7, execution_time=_TIME_READ_MEASUREMENT)
+
+        # Scale factors from datasheet
+        pm_scale = 10.0
+        temp_scale = 200.0
+        humidity_scale = 100.0
+
+        # Track measurement time for startup detection
+        if self._measurement_time is None:
+            self._measurement_time = time.monotonic()
+
+        # Process PM values (uint16, 0xFFFF = unknown)
+        pm1_0: Optional[float] = None if data[0] == _UNKNOWN_VALUE else data[0] / pm_scale
+        pm2_5: Optional[float] = None if data[1] == _UNKNOWN_VALUE else data[1] / pm_scale
+        pm4_0: Optional[float] = None if data[2] == _UNKNOWN_VALUE else data[2] / pm_scale
+        pm10: Optional[float] = None if data[3] == _UNKNOWN_VALUE else data[3] / pm_scale
+
+        # Process RH&T values (int16, 0x7FFF = unknown)
+        humidity: Optional[float] = None if data[4] == _UNKNOWN_VALUE else data[4] / humidity_scale
+        temperature: Optional[float] = None if data[5] == _UNKNOWN_VALUE else data[5] / temp_scale
+
+        # Process CO2 (int16, 0x7FFF = unknown during first 22-24s)
+        co2: Optional[float] = None if data[6] == 0x7FFF else float(data[6])
+
+        self._measurement_data = {
+            "pm1_0": pm1_0,
+            "pm2_5": pm2_5,
+            "pm4_0": pm4_0,
+            "pm10": pm10,
+            "humidity": humidity,
+            "temperature": temperature,
+            "co2": co2,
+        }
+
+        return self._measurement_data
+
+    def raw_values(self) -> Dict[str, Optional[float]]:
+        """Raw sensor values from SEN63C
+
+        Returns:
+            dict:
+                - raw_humidity: Raw humidity (%) or None if unknown
+                - raw_temperature: Raw temperature (°C) or None if unknown
+        """
+        if not self._measurement_started:
+            raise RuntimeError(
+                "Sensor must be in measurement mode. Call start_measurement() first."
+            )
+
+        self._write_command(_SEN63C_READ_RAW_VALUES)
+        data = self._read_data(2, execution_time=_TIME_READ_MEASUREMENT)
+
+        temp_scale = 200.0
+        humidity_scale = 100.0
+
+        return {
+            "raw_humidity": None if data[0] == 0x7FFF else data[0] / humidity_scale,
+            "raw_temperature": None if data[1] == 0x7FFF else data[1] / temp_scale,
+        }
