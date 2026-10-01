@@ -667,6 +667,7 @@ class SEN6x(_SEN6xBase):  # noqa: PLR0904
         super().__init__(i2c, address, startup_delay)
         self._product_name: Optional[str] = None
         self._firmware_version: Optional[Tuple[int, int]] = None
+        self._model_class: Optional[type] = None
         if type(self) is SEN6x:
             # Generic instance: use the data layouts of the detected model
             model = self.model_class
@@ -716,16 +717,44 @@ class SEN6x(_SEN6xBase):  # noqa: PLR0904
 
     @property
     def model_class(self) -> type:
-        """The driver class matching this sensor's product name, e.g. :class:`SEN66`
+        """The driver class matching this sensor, e.g. :class:`SEN66`
+
+        Detected from the product name. Some sensors report an empty product name,
+        in which case each model's Read Measured Values command is tried and the
+        one the sensor answers with valid data is used.
 
         Raises:
-            RuntimeError: If the product name is not a known SEN6x model
+            RuntimeError: If the sensor model cannot be identified
         """
-        name = self.product_name.strip().upper()
-        for model, cls in _SEN6X_MODELS:
-            if name.startswith(model):
-                return cls
-        raise RuntimeError(f"Unrecognised SEN6x product name: {name!r}")
+        if self._model_class is None:
+            name = self.product_name.strip().upper()
+            for model, cls in _SEN6X_MODELS:
+                if name.startswith(model):
+                    self._model_class = cls
+                    break
+            else:
+                for _, cls in _SEN6X_MODELS:
+                    if self._command_supported(
+                        cls._MEASUREMENT_COMMAND, len(cls._MEASUREMENT_FIELDS)
+                    ):
+                        self._model_class = cls
+                        break
+                else:
+                    raise RuntimeError(f"Unrecognised SEN6x product name: {name!r}")
+        return self._model_class
+
+    def _command_supported(self, command: int, num_words: int) -> bool:
+        """True if the sensor answers a read command with CRC-valid data
+
+        Unsupported commands are NACKed, which reads back as 0xFF bytes on some
+        hosts (failing the CRC check) and raises OSError on others.
+        """
+        try:
+            self._write_command(command, execution_time=0)
+            self._read_data(num_words, execution_time=self._TIME_COMMAND)
+        except (OSError, RuntimeError):
+            return False
+        return True
 
     @property
     def device_status(self) -> DeviceStatus:
@@ -1535,5 +1564,6 @@ def create_sensor(
         else:
             sensor = probe.model_class(i2c, sen6x_address, startup_delay=0)
             sensor._product_name = probe.product_name
+            sensor._model_class = probe.model_class
             return sensor
     return SEN60(i2c, SEN60_I2C_ADDRESS if address is None else address, startup_delay=0)
