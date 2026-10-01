@@ -437,9 +437,9 @@ class _SEN6xBase:
             return
         remaining = self._measurement_start_time + self._CO2_CONDITIONING_TIME - time.monotonic()
         if remaining > 0:
+            # Single f-string: CircuitPython can't join adjacent f-strings
             raise RuntimeError(
-                f"Cannot {action} during the CO2 sensor conditioning period, "
-                f"wait {remaining:.1f}s more"
+                f"Cannot {action} during CO2 sensor conditioning, wait {remaining:.1f}s more"
             )
 
     @staticmethod
