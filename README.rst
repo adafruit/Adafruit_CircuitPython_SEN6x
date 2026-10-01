@@ -23,7 +23,8 @@ Introduction
 
 CircuitPython driver for the Sensirion SEN6x environmental sensor node
 
-Supports the SEN62, SEN63C, SEN65, SEN66, SEN68 and SEN69C. Use the class
+Supports the SEN62, SEN63C, SEN65, SEN66, SEN68, SEN69C and the discontinued
+SEN60. Use the class
 matching your sensor, e.g. ``adafruit_sen6x.SEN65(i2c)``.
 
 

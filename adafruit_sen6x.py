@@ -6,7 +6,7 @@
 ================================================================================
 
 CircuitPython driver for the Sensirion SEN6x environmental sensor node
-(SEN62, SEN63C, SEN65, SEN66, SEN68 and SEN69C)
+(SEN60, SEN62, SEN63C, SEN65, SEN66, SEN68 and SEN69C)
 
 
 * Author(s): Liz Clark
@@ -93,6 +93,16 @@ _SEN62_SEN63C_READ_RAW_VALUES = const(0x0492)
 _SEN65_SEN68_SEN69C_READ_RAW_VALUES = const(0x0455)
 _SEN66_READ_RAW_VALUES = const(0x0405)
 
+# SEN60 commands (separate command set, I2C address 0x6C)
+_SEN60_START_MEASUREMENT = const(0x2152)
+_SEN60_STOP_MEASUREMENT = const(0x3F86)
+_SEN60_DATA_READY = const(0xE4B8)
+_SEN60_READ_MEASUREMENT = const(0xEC05)
+_SEN60_SERIAL_NUMBER = const(0x3682)
+_SEN60_DEVICE_STATUS = const(0xE00B)
+_SEN60_RESET = const(0x3F8D)
+_SEN60_FAN_CLEANING = const(0x3730)
+
 # Command execution times (in seconds)
 _TIME_START_MEASUREMENT = const(0.050)  # 50ms
 _TIME_STOP_MEASUREMENT = const(1.400)  # 1400ms
@@ -104,6 +114,8 @@ _TIME_RESET = const(1.200)  # 1200ms for reset
 _TIME_SHT_HEATER = const(1.300)  # 1300ms for SHT heater on older firmware
 _TIME_CO2_RECALIBRATION = const(0.500)  # 500ms for CO2 recalibration
 _TIME_CO2_FACTORY_RESET = const(1.400)  # 1400ms for CO2 sensor factory reset
+_TIME_SEN60_COMMAND = const(0.001)  # 1ms for SEN60 commands
+_TIME_SEN60_STOP_MEASUREMENT = const(1.000)  # 1000ms for SEN60 stop measurement
 
 # Sensor startup time (maximum)
 _SENSOR_STARTUP_TIME = const(1.0)  # 1 second max startup time
@@ -155,6 +167,9 @@ _STATUS_CO2_2_ERROR = const(9)
 _STATUS_GAS_ERROR = const(7)
 _STATUS_RHT_ERROR = const(6)
 _STATUS_FAN_ERROR = const(4)
+
+# SEN60 16-bit status register (fan error is also bit 4)
+_SEN60_STATUS_SPEED_WARNING = const(1)
 
 
 def _convert_word(word: int, is_int16: bool, scale: int) -> Optional[float]:
@@ -299,35 +314,35 @@ class DeviceStatus:
         return "Status: " + ", ".join(status_items)
 
 
-class SEN6x:  # noqa: PLR0904
-    """Base class for Sensirion SEN6x environmental sensors
+class _SEN6xBase:
+    """Shared I2C protocol and measurement handling for the SEN6x family
 
-    Use the model-specific subclass (:class:`SEN62`, :class:`SEN63C`, :class:`SEN65`,
-    :class:`SEN66`, :class:`SEN68` or :class:`SEN69C`) matching your sensor, since
-    each model uses different commands and data layouts for reading measurements.
+    Not intended to be used directly, use :class:`SEN6x` subclasses or :class:`SEN60`.
     """
 
-    # Overridden by each model
+    # Overridden by subclasses: the SEN60 uses its own command set and timings
+    _START_COMMAND: int = _START_MEASUREMENT
+    _STOP_COMMAND: int = _STOP_MEASUREMENT
+    _DATA_READY_COMMAND: int = _DATA_READY
+    _DATA_READY_MASK: int = 0x0001
+    _FAN_CLEANING_COMMAND: int = _FAN_CLEANING
+    _TIME_COMMAND: float = _TIME_STANDARD
+    _TIME_START: float = _TIME_START_MEASUREMENT
+    _TIME_STOP: float = _TIME_STOP_MEASUREMENT
     _MEASUREMENT_COMMAND: Optional[int] = None
     _MEASUREMENT_FIELDS: Tuple = ()
-    _RAW_VALUES_COMMAND: Optional[int] = None
-    _RAW_VALUES_FIELDS: Tuple = ()
-    # First firmware version supporting Get SHT Heater Measurements
-    _SHT_HEATER_POLL_FIRMWARE: Tuple[int, int] = (0, 0)
     # CO2 conditioning period after measurement start (SEN63C, SEN69C)
     _CO2_CONDITIONING_TIME: float = 0
 
-    def __init__(self, i2c: I2C, address: int = SEN6X_I2C_ADDRESS) -> None:
+    def __init__(self, i2c: I2C, address: int, startup_delay: float) -> None:
         self.i2c_device: I2CDevice = I2CDevice(i2c, address)
         self._serial_number: Optional[str] = None
-        self._product_name: Optional[str] = None
-        self._firmware_version: Optional[Tuple[int, int]] = None
         self._measurement_started: bool = False
         self._measurement_data: Optional[Dict[str, Optional[float]]] = None
         self._measurement_start_time: Optional[float] = None
 
         # Allow sensor to complete startup
-        time.sleep(_SENSOR_STARTUP_TIME)
+        time.sleep(startup_delay)
 
     def _write_command(
         self, command: int, data: Optional[List[int]] = None, execution_time: float = _TIME_STANDARD
@@ -393,19 +408,12 @@ class SEN6x:  # noqa: PLR0904
 
     def _read_values(self, command: int, fields: Tuple) -> Dict[str, Optional[float]]:
         """Send a read command and decode the returned words using a field layout"""
-        self._write_command(command)
-        data = self._read_data(len(fields), execution_time=_TIME_READ_MEASUREMENT)
+        self._write_command(command, execution_time=0)
+        data = self._read_data(len(fields), execution_time=self._TIME_COMMAND)
         return {
             name: _convert_word(word, is_int16, scale)
             for (name, is_int16, scale), word in zip(fields, data)
         }
-
-    def _read_string(self, command: int) -> str:
-        """Read a null-terminated string<32> (16 words)"""
-        self._write_command(command)
-        data = self._read_data(16, execution_time=_TIME_STANDARD)
-        raw = b"".join(struct.pack(">H", word) for word in data)
-        return raw.split(b"\x00")[0].decode("utf-8")
 
     def _require_measuring(self) -> None:
         """Raise if the sensor is not in measurement mode"""
@@ -452,22 +460,6 @@ class SEN6x:  # noqa: PLR0904
                 crc &= 0xFF
         return crc
 
-    def reset(self) -> None:
-        """Reset the sensor
-
-        Has the same effect as a power cycle. Measurement is stopped first if running.
-        After reset, the sensor needs time to start up before accepting commands.
-        All volatile configuration parameters are reset to default values.
-        """
-        self.stop_measurement()
-        self._write_command(_RESET, execution_time=_TIME_RESET)
-        # Clear cached values
-        self._serial_number = None
-        self._product_name = None
-        self._measurement_data = None
-        # Wait for sensor to restart
-        time.sleep(_SENSOR_STARTUP_TIME)
-
     def start_measurement(self) -> None:
         """Start continuous measurement mode
 
@@ -484,18 +476,18 @@ class SEN6x:  # noqa: PLR0904
         if self._measurement_started:
             return
         self._check_co2_conditioning("restart measurement")
-        self._write_command(_START_MEASUREMENT, execution_time=_TIME_START_MEASUREMENT)
+        self._write_command(self._START_COMMAND, execution_time=self._TIME_START)
         self._measurement_started = True
         self._measurement_start_time = time.monotonic()
 
     def stop_measurement(self) -> None:
         """Stop continuous measurement mode
 
-        Note: This command takes up to 1.4 seconds to execute.
+        Note: This command takes up to 1.4 seconds (1 second on SEN60) to execute.
         """
         if not self._measurement_started:
             return
-        self._write_command(_STOP_MEASUREMENT, execution_time=_TIME_STOP_MEASUREMENT)
+        self._write_command(self._STOP_COMMAND, execution_time=self._TIME_STOP)
         self._measurement_started = False
 
     @property
@@ -508,53 +500,9 @@ class SEN6x:  # noqa: PLR0904
         if not self._measurement_started:
             return False
 
-        self._write_command(_DATA_READY)
-        data = self._read_data(1, execution_time=_TIME_DATA_READY)
-        # Last bit indicates data ready status
-        return bool(data[0] & 0x0001)
-
-    @property
-    def serial_number(self) -> str:
-        """The sensor serial number as ASCII string (up to 32 characters)"""
-        if self._serial_number is None:
-            self._serial_number = self._read_string(_SERIAL_NUMBER)
-        return self._serial_number
-
-    @property
-    def product_name(self) -> str:
-        """The product name as ASCII string (up to 32 characters)"""
-        if self._product_name is None:
-            self._product_name = self._read_string(_PRODUCT_NAME)
-        return self._product_name
-
-    @property
-    def device_status(self) -> DeviceStatus:
-        """The device status register
-
-        Returns:
-            DeviceStatus: Object containing parsed status information
-        """
-        self._write_command(_DEVICE_STATUS)
-        # Status register is 32 bits (2 words)
-        data = self._read_data(2, execution_time=_TIME_STANDARD)
-        # Combine into 32-bit value (MSB first)
-        status_value = (data[0] << 16) | data[1]
-        return DeviceStatus(status_value)
-
-    def clear_device_status(self) -> DeviceStatus:
-        """Read and clear the device status register
-
-        This clears all error and warning flags. Note that if the error
-        condition persists, the flags will be set again. All error flags
-        are "sticky" - they remain set even if the error condition goes
-        away, until explicitly cleared by this command or a device reset.
-
-        Returns:
-            DeviceStatus: The device status from before it was cleared
-        """
-        self._write_command(_CLEAR_DEVICE_STATUS)
-        data = self._read_data(2, execution_time=_TIME_STANDARD)
-        return DeviceStatus((data[0] << 16) | data[1])
+        self._write_command(self._DATA_READY_COMMAND, execution_time=0)
+        data = self._read_data(1, execution_time=self._TIME_COMMAND)
+        return bool(data[0] & self._DATA_READY_MASK)
 
     def start_fan_cleaning(self) -> None:
         """Start the fan cleaning procedure
@@ -569,74 +517,12 @@ class SEN6x:  # noqa: PLR0904
             RuntimeError: If sensor is currently measuring
         """
         self._require_idle("start fan cleaning")
-        self._write_command(_FAN_CLEANING, execution_time=_TIME_STANDARD)
+        self._write_command(self._FAN_CLEANING_COMMAND, execution_time=self._TIME_COMMAND)
 
     @property
-    def version(self) -> Tuple[int, int]:
-        """Firmware version information
-
-        Returns:
-            tuple: (major_version, minor_version)
-        """
-        if self._firmware_version is None:
-            self._write_command(_VERSION)
-            data = self._read_data(1, execution_time=_TIME_STANDARD)
-            # Version is packed as two bytes in one word
-            self._firmware_version = ((data[0] >> 8) & 0xFF, data[0] & 0xFF)
-        return self._firmware_version
-
-    @property
-    def sht_heater_polling_supported(self) -> bool:
-        """True if the firmware supports polling :attr:`sht_heater_measurements`
-
-        Older firmware does not support Get SHT Heater Measurements, and its
-        Activate SHT Heater command blocks for 1.3 seconds instead of 20ms.
-        """
-        return self.version >= self._SHT_HEATER_POLL_FIRMWARE
-
-    def activate_sht_heater(self) -> None:
-        """Activate the SHT sensor heater to reverse humidity creep
-
-        Heats the SHT sensor with 200mW for 1s, after which the heater switches off
-        automatically. If :attr:`sht_heater_polling_supported`, poll
-        :attr:`sht_heater_measurements` to find out when heating has finished.
-
-        Wait at least 20s after this command before starting a measurement to get
-        coherent temperature values.
-
-        Raises:
-            RuntimeError: If sensor is currently measuring
-        """
-        self._require_idle("activate SHT heater")
-        execution_time = _TIME_STANDARD if self.sht_heater_polling_supported else _TIME_SHT_HEATER
-        self._write_command(_ACTIVATE_SHT_HEATER, execution_time=execution_time)
-
-    @property
-    def sht_heater_measurements(self) -> Dict[str, Optional[float]]:
-        """SHT sensor measurements once heating from :meth:`activate_sht_heater` is finished
-
-        Can be polled every 50ms after activating the heater. Values are None
-        until heating is finished.
-
-        Requires firmware SEN62 >= 6.0, SEN63C >= 5.0, SEN65 >= 5.0, SEN66 >= 4.0,
-        SEN68 >= 7.0 or SEN69C >= 9.0.
-
-        Returns:
-            dict: {'humidity': value or None, 'temperature': value or None}
-
-        Raises:
-            RuntimeError: If sensor is measuring or firmware does not support this command
-        """
-        self._require_idle("read SHT heater measurements")
-        if not self.sht_heater_polling_supported:
-            major, minor = self._SHT_HEATER_POLL_FIRMWARE
-            raise RuntimeError(f"SHT heater measurements require firmware >= {major}.{minor}")
-        self._write_command(_SHT_HEATER)
-        data = self._read_data(2, execution_time=_TIME_STANDARD)
-        return {
-            name: _convert_word(word, is_int16, scale)
-            for (name, is_int16, scale), word in zip(_SHT_HEATER_FIELDS, data)
-        }
+    def device_status(self) -> DeviceStatus:
+        """The device status register"""
+        raise NotImplementedError
 
     def check_sensor_errors(self) -> None:
         """Check device status and raise exception if critical errors present
@@ -702,11 +588,13 @@ class SEN6x:  # noqa: PLR0904
         Keys present depend on the model:
 
         - pm1_0, pm2_5, pm4_0, pm10: Mass concentration (µg/m³), all models
-        - humidity: Relative humidity (%), all models
-        - temperature: Temperature (°C), all models
+        - humidity: Relative humidity (%), all models except SEN60
+        - temperature: Temperature (°C), all models except SEN60
         - voc_index, nox_index: VOC/NOx index (1.0-500.0), SEN65, SEN66, SEN68, SEN69C
         - hcho: Formaldehyde concentration (ppb), SEN68, SEN69C
         - co2: CO2 concentration (ppm), SEN63C, SEN66, SEN69C
+        - nc_pm0_5, nc_pm1_0, nc_pm2_5, nc_pm4_0, nc_pm10: Number concentration
+          (particles/cm³), SEN60 only (use :meth:`number_concentration` on other models)
 
         Returns:
             dict: Measurement name to value or None if unknown
@@ -721,6 +609,188 @@ class SEN6x:  # noqa: PLR0904
             self._MEASUREMENT_COMMAND, self._MEASUREMENT_FIELDS
         )
         return self._measurement_data
+
+    @property
+    def pm1_0(self) -> Optional[float]:
+        """PM1.0 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm1_0"] if self._measurement_data else None
+
+    @property
+    def pm2_5(self) -> Optional[float]:
+        """PM2.5 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm2_5"] if self._measurement_data else None
+
+    @property
+    def pm4_0(self) -> Optional[float]:
+        """PM4.0 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm4_0"] if self._measurement_data else None
+
+    @property
+    def pm10(self) -> Optional[float]:
+        """PM10 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm10"] if self._measurement_data else None
+
+
+class SEN6x(_SEN6xBase):  # noqa: PLR0904
+    """Base class for Sensirion SEN6x environmental sensors
+
+    Use the model-specific subclass (:class:`SEN62`, :class:`SEN63C`, :class:`SEN65`,
+    :class:`SEN66`, :class:`SEN68` or :class:`SEN69C`) matching your sensor, since
+    each model uses different commands and data layouts for reading measurements.
+
+    Args:
+        i2c: The I2C bus the sensor is connected to
+        address: The I2C address of the sensor (default: 0x6B)
+        startup_delay: Seconds to wait for the sensor to start up (default: 1.0).
+            Can be set to 0 if the sensor has already been powered for a while.
+    """
+
+    _RAW_VALUES_COMMAND: Optional[int] = None
+    _RAW_VALUES_FIELDS: Tuple = ()
+    # First firmware version supporting Get SHT Heater Measurements
+    _SHT_HEATER_POLL_FIRMWARE: Tuple[int, int] = (0, 0)
+
+    def __init__(
+        self,
+        i2c: I2C,
+        address: int = SEN6X_I2C_ADDRESS,
+        startup_delay: float = _SENSOR_STARTUP_TIME,
+    ) -> None:
+        super().__init__(i2c, address, startup_delay)
+        self._product_name: Optional[str] = None
+        self._firmware_version: Optional[Tuple[int, int]] = None
+
+    def _read_string(self, command: int) -> str:
+        """Read a null-terminated string<32> (16 words)"""
+        self._write_command(command)
+        data = self._read_data(16, execution_time=_TIME_STANDARD)
+        raw = b"".join(struct.pack(">H", word) for word in data)
+        return raw.split(b"\x00")[0].decode("utf-8")
+
+    def reset(self) -> None:
+        """Reset the sensor
+
+        Has the same effect as a power cycle. Measurement is stopped first if running.
+        After reset, the sensor needs time to start up before accepting commands.
+        All volatile configuration parameters are reset to default values.
+        """
+        self.stop_measurement()
+        self._write_command(_RESET, execution_time=_TIME_RESET)
+        # Clear cached values
+        self._serial_number = None
+        self._product_name = None
+        self._measurement_data = None
+        # Wait for sensor to restart
+        time.sleep(_SENSOR_STARTUP_TIME)
+
+    @property
+    def serial_number(self) -> str:
+        """The sensor serial number as ASCII string (up to 32 characters)"""
+        if self._serial_number is None:
+            self._serial_number = self._read_string(_SERIAL_NUMBER)
+        return self._serial_number
+
+    @property
+    def product_name(self) -> str:
+        """The product name as ASCII string (up to 32 characters)"""
+        if self._product_name is None:
+            self._product_name = self._read_string(_PRODUCT_NAME)
+        return self._product_name
+
+    @property
+    def device_status(self) -> DeviceStatus:
+        """The device status register
+
+        Returns:
+            DeviceStatus: Object containing parsed status information
+        """
+        self._write_command(_DEVICE_STATUS)
+        # Status register is 32 bits (2 words)
+        data = self._read_data(2, execution_time=_TIME_STANDARD)
+        # Combine into 32-bit value (MSB first)
+        status_value = (data[0] << 16) | data[1]
+        return DeviceStatus(status_value)
+
+    def clear_device_status(self) -> DeviceStatus:
+        """Read and clear the device status register
+
+        This clears all error and warning flags. Note that if the error
+        condition persists, the flags will be set again. All error flags
+        are "sticky" - they remain set even if the error condition goes
+        away, until explicitly cleared by this command or a device reset.
+
+        Returns:
+            DeviceStatus: The device status from before it was cleared
+        """
+        self._write_command(_CLEAR_DEVICE_STATUS)
+        data = self._read_data(2, execution_time=_TIME_STANDARD)
+        return DeviceStatus((data[0] << 16) | data[1])
+
+    @property
+    def version(self) -> Tuple[int, int]:
+        """Firmware version information
+
+        Returns:
+            tuple: (major_version, minor_version)
+        """
+        if self._firmware_version is None:
+            self._write_command(_VERSION)
+            data = self._read_data(1, execution_time=_TIME_STANDARD)
+            # Version is packed as two bytes in one word
+            self._firmware_version = ((data[0] >> 8) & 0xFF, data[0] & 0xFF)
+        return self._firmware_version
+
+    @property
+    def sht_heater_polling_supported(self) -> bool:
+        """True if the firmware supports polling :attr:`sht_heater_measurements`
+
+        Older firmware does not support Get SHT Heater Measurements, and its
+        Activate SHT Heater command blocks for 1.3 seconds instead of 20ms.
+        """
+        return self.version >= self._SHT_HEATER_POLL_FIRMWARE
+
+    def activate_sht_heater(self) -> None:
+        """Activate the SHT sensor heater to reverse humidity creep
+
+        Heats the SHT sensor with 200mW for 1s, after which the heater switches off
+        automatically. If :attr:`sht_heater_polling_supported`, poll
+        :attr:`sht_heater_measurements` to find out when heating has finished.
+
+        Wait at least 20s after this command before starting a measurement to get
+        coherent temperature values.
+
+        Raises:
+            RuntimeError: If sensor is currently measuring
+        """
+        self._require_idle("activate SHT heater")
+        execution_time = _TIME_STANDARD if self.sht_heater_polling_supported else _TIME_SHT_HEATER
+        self._write_command(_ACTIVATE_SHT_HEATER, execution_time=execution_time)
+
+    @property
+    def sht_heater_measurements(self) -> Dict[str, Optional[float]]:
+        """SHT sensor measurements once heating from :meth:`activate_sht_heater` is finished
+
+        Can be polled every 50ms after activating the heater. Values are None
+        until heating is finished.
+
+        Requires firmware SEN62 >= 6.0, SEN63C >= 5.0, SEN65 >= 5.0, SEN66 >= 4.0,
+        SEN68 >= 7.0 or SEN69C >= 9.0.
+
+        Returns:
+            dict: {'humidity': value or None, 'temperature': value or None}
+
+        Raises:
+            RuntimeError: If sensor is measuring or firmware does not support this command
+        """
+        self._require_idle("read SHT heater measurements")
+        if not self.sht_heater_polling_supported:
+            major, minor = self._SHT_HEATER_POLL_FIRMWARE
+            raise RuntimeError(f"SHT heater measurements require firmware >= {major}.{minor}")
+        return self._read_values(_SHT_HEATER, _SHT_HEATER_FIELDS)
 
     def raw_values(self) -> Dict[str, Optional[float]]:
         """Raw sensor values for this sensor model
@@ -825,30 +895,6 @@ class SEN6x:  # noqa: PLR0904
         """Relative humidity in percent"""
         self.all_measurements()
         return self._measurement_data["humidity"] if self._measurement_data else None
-
-    @property
-    def pm1_0(self) -> Optional[float]:
-        """PM1.0 concentration in µg/m³"""
-        self.all_measurements()
-        return self._measurement_data["pm1_0"] if self._measurement_data else None
-
-    @property
-    def pm2_5(self) -> Optional[float]:
-        """PM2.5 concentration in µg/m³"""
-        self.all_measurements()
-        return self._measurement_data["pm2_5"] if self._measurement_data else None
-
-    @property
-    def pm4_0(self) -> Optional[float]:
-        """PM4.0 concentration in µg/m³"""
-        self.all_measurements()
-        return self._measurement_data["pm4_0"] if self._measurement_data else None
-
-    @property
-    def pm10(self) -> Optional[float]:
-        """PM10 concentration in µg/m³"""
-        self.all_measurements()
-        return self._measurement_data["pm10"] if self._measurement_data else None
 
 
 class VOCNOxMixin:
@@ -1300,3 +1346,116 @@ class SEN69C(VOCNOxMixin, FormaldehydeMixin, CO2Mixin, SEN6x):
     _RAW_VALUES_FIELDS = _RAW_RHT_FIELDS + _RAW_VOC_NOX_FIELDS
     _SHT_HEATER_POLL_FIRMWARE = (9, 0)
     _CO2_CONDITIONING_TIME = 24
+
+
+class SEN60(_SEN6xBase):
+    """Driver for SEN60 sensor (discontinued) - measures PM mass and number concentration
+
+    The SEN60 uses a different I2C address (0x6C) and command set from the rest
+    of the SEN6x family. It has no RH/T, gas or CO2 sensors, and does not support
+    product name, firmware version or the temperature compensation commands.
+
+    Args:
+        i2c: The I2C bus the sensor is connected to
+        address: The I2C address of the sensor (default: 0x6C)
+        startup_delay: Seconds to wait for the sensor to start up (default: 1.0).
+            Can be set to 0 if the sensor has already been powered for a while.
+    """
+
+    _START_COMMAND = _SEN60_START_MEASUREMENT
+    _STOP_COMMAND = _SEN60_STOP_MEASUREMENT
+    _DATA_READY_COMMAND = _SEN60_DATA_READY
+    _DATA_READY_MASK = 0x07FF  # Bits 10..0, non-zero when data is ready
+    _FAN_CLEANING_COMMAND = _SEN60_FAN_CLEANING
+    _TIME_COMMAND = _TIME_SEN60_COMMAND
+    _TIME_START = _TIME_SEN60_COMMAND
+    _TIME_STOP = _TIME_SEN60_STOP_MEASUREMENT
+    _MEASUREMENT_COMMAND = _SEN60_READ_MEASUREMENT
+    _MEASUREMENT_FIELDS = _PM_RHT_FIELDS[:4] + _NUMBER_CONCENTRATION_FIELDS
+
+    def __init__(
+        self,
+        i2c: I2C,
+        address: int = SEN60_I2C_ADDRESS,
+        startup_delay: float = _SENSOR_STARTUP_TIME,
+    ) -> None:
+        super().__init__(i2c, address, startup_delay)
+
+    def reset(self) -> None:
+        """Reset the sensor
+
+        Has the same effect as a power cycle. Can be used in idle or measurement
+        mode; the sensor returns to idle mode.
+        """
+        self._write_command(_SEN60_RESET, execution_time=_TIME_SEN60_COMMAND)
+        self._measurement_started = False
+        self._serial_number = None
+        self._measurement_data = None
+        # Wait for sensor to restart
+        time.sleep(_SENSOR_STARTUP_TIME)
+
+    @property
+    def serial_number(self) -> str:
+        """The sensor serial number as a 12-digit hexadecimal string
+
+        Can only be read from the sensor in idle mode, the value is cached afterwards.
+        """
+        if self._serial_number is None:
+            self._require_idle("read serial number")
+            self._write_command(_SEN60_SERIAL_NUMBER, execution_time=0)
+            data = self._read_data(3, execution_time=_TIME_SEN60_COMMAND)
+            self._serial_number = "".join(f"{word:04X}" for word in data)
+        return self._serial_number
+
+    @property
+    def device_status(self) -> DeviceStatus:
+        """The device status register
+
+        The SEN60 has a 16-bit status register with only the fan speed warning
+        (bit 1) and fan error (bit 4). These are mapped onto the same
+        :class:`DeviceStatus` flags as the other SEN6x models.
+
+        Note: Error flags can only be cleared by :meth:`reset` or a power cycle.
+
+        Returns:
+            DeviceStatus: Object containing parsed status information
+        """
+        self._write_command(_SEN60_DEVICE_STATUS, execution_time=0)
+        data = self._read_data(1, execution_time=_TIME_SEN60_COMMAND)
+        status = data[0] & (1 << _STATUS_FAN_ERROR)
+        if data[0] & (1 << _SEN60_STATUS_SPEED_WARNING):
+            status |= 1 << _STATUS_SPEED_WARNING
+        return DeviceStatus(status)
+
+    def all_measurements(self) -> Dict[str, Optional[float]]:
+        """All measurement values from SEN60
+
+        The SEN60 only returns each measurement once and NACKs further reads until
+        new data is available. In that case the previously read values are returned.
+
+        Returns:
+            dict:
+                - pm1_0, pm2_5, pm4_0, pm10: Mass concentration (µg/m³)
+                - nc_pm0_5, nc_pm1_0, nc_pm2_5, nc_pm4_0, nc_pm10: Number
+                  concentration (particles/cm³)
+
+        Raises:
+            RuntimeError: If sensor is not in measurement mode
+            OSError: If no measurement has been read yet and none is available
+        """
+        try:
+            return super().all_measurements()
+        except OSError:
+            if self._measurement_data is None:
+                raise
+            return self._measurement_data
+
+    def number_concentration(self) -> Dict[str, Optional[float]]:
+        """Particle number concentration values
+
+        Returns:
+            dict: Dictionary containing number concentrations (particles/cm³):
+                nc_pm0_5, nc_pm1_0, nc_pm2_5, nc_pm4_0 and nc_pm10
+        """
+        data = self.all_measurements()
+        return {name: data[name] for name, _, _ in _NUMBER_CONCENTRATION_FIELDS}
