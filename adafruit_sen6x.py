@@ -638,9 +638,13 @@ class _SEN6xBase:
 class SEN6x(_SEN6xBase):  # noqa: PLR0904
     """Base class for Sensirion SEN6x environmental sensors
 
-    Use the model-specific subclass (:class:`SEN62`, :class:`SEN63C`, :class:`SEN65`,
-    :class:`SEN66`, :class:`SEN68` or :class:`SEN69C`) matching your sensor, since
-    each model uses different commands and data layouts for reading measurements.
+    Each model uses different commands and data layouts for reading measurements.
+    Using ``SEN6x`` directly detects the model from its product name, so
+    :meth:`all_measurements`, :meth:`raw_values` and the common properties work
+    for any model. For model-specific features (VOC/NOx, CO2 and formaldehyde
+    commands and properties) use :func:`create_sensor`, or the subclass matching
+    your sensor: :class:`SEN62`, :class:`SEN63C`, :class:`SEN65`, :class:`SEN66`,
+    :class:`SEN68` or :class:`SEN69C`.
 
     Args:
         i2c: The I2C bus the sensor is connected to
@@ -663,6 +667,15 @@ class SEN6x(_SEN6xBase):  # noqa: PLR0904
         super().__init__(i2c, address, startup_delay)
         self._product_name: Optional[str] = None
         self._firmware_version: Optional[Tuple[int, int]] = None
+        if type(self) is SEN6x:
+            # Generic instance: use the data layouts of the detected model
+            model = self.model_class
+            self._MEASUREMENT_COMMAND = model._MEASUREMENT_COMMAND
+            self._MEASUREMENT_FIELDS = model._MEASUREMENT_FIELDS
+            self._RAW_VALUES_COMMAND = model._RAW_VALUES_COMMAND
+            self._RAW_VALUES_FIELDS = model._RAW_VALUES_FIELDS
+            self._SHT_HEATER_POLL_FIRMWARE = model._SHT_HEATER_POLL_FIRMWARE
+            self._CO2_CONDITIONING_TIME = model._CO2_CONDITIONING_TIME
 
     def _read_string(self, command: int) -> str:
         """Read a null-terminated string<32> (16 words)"""
@@ -700,6 +713,19 @@ class SEN6x(_SEN6xBase):  # noqa: PLR0904
         if self._product_name is None:
             self._product_name = self._read_string(_PRODUCT_NAME)
         return self._product_name
+
+    @property
+    def model_class(self) -> type:
+        """The driver class matching this sensor's product name, e.g. :class:`SEN66`
+
+        Raises:
+            RuntimeError: If the product name is not a known SEN6x model
+        """
+        name = self.product_name.strip().upper()
+        for model, cls in _SEN6X_MODELS:
+            if name.startswith(model):
+                return cls
+        raise RuntimeError(f"Unrecognised SEN6x product name: {name!r}")
 
     @property
     def device_status(self) -> DeviceStatus:
@@ -1459,3 +1485,55 @@ class SEN60(_SEN6xBase):
         """
         data = self.all_measurements()
         return {name: data[name] for name, _, _ in _NUMBER_CONCENTRATION_FIELDS}
+
+
+# Product name prefix to driver class, for models at SEN6X_I2C_ADDRESS
+_SEN6X_MODELS = (
+    ("SEN62", SEN62),
+    ("SEN63C", SEN63C),
+    ("SEN65", SEN65),
+    ("SEN66", SEN66),
+    ("SEN68", SEN68),
+    ("SEN69C", SEN69C),
+)
+
+
+def create_sensor(
+    i2c: I2C, address: Optional[int] = None, startup_delay: float = _SENSOR_STARTUP_TIME
+) -> Union[SEN6x, SEN60]:
+    """Detect which SEN6x model is connected and create the matching driver
+
+    Reads the product name of a sensor at 0x6B to pick between :class:`SEN62`,
+    :class:`SEN63C`, :class:`SEN65`, :class:`SEN66`, :class:`SEN68` and
+    :class:`SEN69C`. If no sensor responds there, a :class:`SEN60` at 0x6C is used.
+
+    .. code-block:: python
+
+        sensor = adafruit_sen6x.create_sensor(board.I2C())
+        print(type(sensor).__name__)  # e.g. SEN66
+
+    Args:
+        i2c: The I2C bus the sensor is connected to
+        address: Only look for a sensor at this address. 0x6C (SEN60_I2C_ADDRESS)
+            creates a :class:`SEN60`, any other address is treated as a SEN6x.
+            Default None tries 0x6B, then 0x6C.
+        startup_delay: Seconds to wait for the sensor to start up (default: 1.0).
+            Can be set to 0 if the sensor has already been powered for a while.
+
+    Raises:
+        ValueError: If no sensor is found
+        RuntimeError: If the product name is not a known SEN6x model
+    """
+    time.sleep(startup_delay)
+    if address != SEN60_I2C_ADDRESS:
+        sen6x_address = SEN6X_I2C_ADDRESS if address is None else address
+        try:
+            probe = SEN6x(i2c, sen6x_address, startup_delay=0)
+        except ValueError:  # No device at this address
+            if address is not None:
+                raise
+        else:
+            sensor = probe.model_class(i2c, sen6x_address, startup_delay=0)
+            sensor._product_name = probe.product_name
+            return sensor
+    return SEN60(i2c, SEN60_I2C_ADDRESS if address is None else address, startup_delay=0)

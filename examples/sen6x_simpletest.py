@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 # Simpletest for the SEN6x Driver
-# Uncomment the init for your SEN6x sensor
+# The sensor model is detected automatically, or uncomment the init for your sensor
 import time
 
 import board
@@ -14,15 +14,17 @@ import adafruit_sen6x
 i2c = board.I2C()
 
 # Initialize the sensor:
-sensor = adafruit_sen6x.SEN66(i2c)  # SEN66 sensors
+sensor = adafruit_sen6x.create_sensor(i2c)  # Detects the connected model
+# sensor = adafruit_sen6x.SEN66(i2c)  # SEN66 sensors
 # sensor = adafruit_sen6x.SEN62(i2c)  # SEN62 sensors
 # sensor = adafruit_sen6x.SEN63C(i2c)  # SEN63C sensors
 # sensor = adafruit_sen6x.SEN65(i2c)  # SEN65 sensors
 # sensor = adafruit_sen6x.SEN68(i2c)  # SEN68 sensors
 # sensor = adafruit_sen6x.SEN69C(i2c)  # SEN69C sensors
+# sensor = adafruit_sen6x.SEN60(i2c)  # SEN60 sensors (discontinued)
 
 # Read sensor info
-print(f"Product: {sensor.product_name}")
+print(f"Model: {type(sensor).__name__}")
 print(f"Serial: {sensor.serial_number}")
 
 # Check device status
@@ -61,6 +63,7 @@ labels = {
     "nox_index": ("NOx Index", ""),
     "hcho": ("HCHO", "ppb"),
     "co2": ("CO2", "ppm"),
+    "nc_pm2_5": ("PM2.5 number", "#/cm³"),  # SEN60 only
 }
 
 # Read data continuously

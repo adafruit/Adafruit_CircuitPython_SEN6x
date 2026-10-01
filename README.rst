@@ -24,8 +24,8 @@ Introduction
 CircuitPython driver for the Sensirion SEN6x environmental sensor node
 
 Supports the SEN62, SEN63C, SEN65, SEN66, SEN68, SEN69C and the discontinued
-SEN60. Use the class
-matching your sensor, e.g. ``adafruit_sen6x.SEN65(i2c)``.
+SEN60. Use ``adafruit_sen6x.create_sensor(i2c)`` to detect the connected model,
+or the class matching your sensor, e.g. ``adafruit_sen6x.SEN65(i2c)``.
 
 
 Dependencies
@@ -102,7 +102,7 @@ Usage Example
     import adafruit_sen6x
 
     i2c = board.I2C()
-    sensor = adafruit_sen6x.SEN66(i2c)
+    sensor = adafruit_sen6x.create_sensor(i2c)  # or e.g. adafruit_sen6x.SEN66(i2c)
     sensor.start_measurement()
     time.sleep(2)
     if sensor.data_ready:
