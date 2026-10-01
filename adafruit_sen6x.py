@@ -6,6 +6,7 @@
 ================================================================================
 
 CircuitPython driver for the Sensirion SEN6x environmental sensor node
+(SEN62, SEN63C, SEN65, SEN66, SEN68 and SEN69C)
 
 
 * Author(s): Liz Clark
@@ -42,7 +43,7 @@ __version__ = "0.0.0+auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_SEN6x.git"
 
 # I2C addresses for SEN6x series
-SEN6X_I2C_ADDRESS = const(0x6B)  # SEN63C, SEN65, SEN66, SEN68
+SEN6X_I2C_ADDRESS = const(0x6B)  # SEN62, SEN63C, SEN65, SEN66, SEN68, SEN69C
 SEN60_I2C_ADDRESS = const(0x6C)  # SEN60 only
 
 # Common commands shared across all SEN6x variants
@@ -57,44 +58,52 @@ _PRODUCT_NAME = const(0xD014)
 _DEVICE_STATUS = const(0xD206)
 _CLEAR_DEVICE_STATUS = const(0xD210)
 _FAN_CLEANING = const(0x5607)
-_VOC_STATE = const(0x6181)
-_VOC_TUNING = const(0x60D0)
-# CO2 commands (SEN66 specific)
-_FORCE_CO2_RECALIBRATION = const(0x6707)
-_CO2_AUTO_CALIB = const(0x6711)
-_AMBIENT_PRESSURE = const(0x6720)
-_SENSOR_ALTITUDE = const(0x6736)
-_SHT_HEATER = const(0x6790)
-
-# NOx algorithm commands
-_NOX_TUNING = const(0x60E1)
+_READ_NUMBER_CONCENTRATION = const(0x0316)
 
 # Temperature configuration commands
 _TEMP_OFFSET = const(0x60B2)
 _TEMP_ACCELERATION = const(0x6100)
 
-# SEN66-specific commands
-_SEN66_READ_MEASUREMENT = const(0x0300)  # Read all measurements
-_SEN66_READ_RAW_VALUES = const(0x0405)  # Read raw values
-_READ_NUMBER_CONCENTRATION = const(0x0316)
-
-# SEN63C-specific commands
-_SEN63C_READ_MEASUREMENT = const(0x0471)  # Read all measurements
-_SEN63C_READ_RAW_VALUES = const(0x0492)  # Read raw values
-
-# Activate SHT heater
+# SHT heater commands
 _ACTIVATE_SHT_HEATER = const(0x6765)
+_SHT_HEATER = const(0x6790)
+
+# VOC/NOx algorithm commands (SEN65, SEN66, SEN68, SEN69C)
+_VOC_STATE = const(0x6181)
+_VOC_TUNING = const(0x60D0)
+_NOX_TUNING = const(0x60E1)
+
+# CO2 commands (SEN63C, SEN66, SEN69C)
+_FORCE_CO2_RECALIBRATION = const(0x6707)
+_CO2_FACTORY_RESET = const(0x6754)
+_CO2_AUTO_CALIB = const(0x6711)
+_AMBIENT_PRESSURE = const(0x6720)
+_SENSOR_ALTITUDE = const(0x6736)
+
+# Model-specific read measured values commands
+_SEN62_READ_MEASUREMENT = const(0x04A3)
+_SEN63C_READ_MEASUREMENT = const(0x0471)
+_SEN65_READ_MEASUREMENT = const(0x0446)
+_SEN66_READ_MEASUREMENT = const(0x0300)
+_SEN68_READ_MEASUREMENT = const(0x0467)
+_SEN69C_READ_MEASUREMENT = const(0x04B5)
+
+# Model-specific read measured raw values commands
+_SEN62_SEN63C_READ_RAW_VALUES = const(0x0492)
+_SEN65_SEN68_SEN69C_READ_RAW_VALUES = const(0x0455)
+_SEN66_READ_RAW_VALUES = const(0x0405)
 
 # Command execution times (in seconds)
 _TIME_START_MEASUREMENT = const(0.050)  # 50ms
-_TIME_STOP_MEASUREMENT = const(1.000)  # 1000ms
+_TIME_STOP_MEASUREMENT = const(1.400)  # 1400ms
 _TIME_DATA_READY = const(0.020)  # 20ms
 _TIME_READ_MEASUREMENT = const(0.020)  # 20ms
 _TIME_STANDARD = const(0.020)  # 20ms for most commands
 _TIME_MINIMAL = const(0.001)  # 1ms minimum wait
 _TIME_RESET = const(1.200)  # 1200ms for reset
-_TIME_SHT_HEATER = const(1.300)  # 1300ms for SHT heater
+_TIME_SHT_HEATER = const(1.300)  # 1300ms for SHT heater on older firmware
 _TIME_CO2_RECALIBRATION = const(0.500)  # 500ms for CO2 recalibration
+_TIME_CO2_FACTORY_RESET = const(1.400)  # 1400ms for CO2 sensor factory reset
 
 # Sensor startup time (maximum)
 _SENSOR_STARTUP_TIME = const(1.0)  # 1 second max startup time
@@ -105,7 +114,34 @@ _NOX_STARTUP_TIME = const(11.0)  # 10-11s for NOx sensor initialization
 _CO2_STARTUP_TIME = const(6.0)  # 5-6s for CO2 sensor initialization
 
 # Data value indicators
-_UNKNOWN_VALUE = const(0xFFFF)  # Unknown value for unsigned 16-bit
+_UNKNOWN_UINT16 = const(0xFFFF)  # Unknown value for unsigned 16-bit
+_UNKNOWN_INT16 = const(0x7FFF)  # Unknown value for signed 16-bit
+
+# Word layouts returned by the read commands: (key, is_int16, scale factor).
+# int16 words report unknown as 0x7FFF, uint16 words report unknown as 0xFFFF.
+_PM_RHT_FIELDS = (
+    ("pm1_0", False, 10),
+    ("pm2_5", False, 10),
+    ("pm4_0", False, 10),
+    ("pm10", False, 10),
+    ("humidity", True, 100),
+    ("temperature", True, 200),
+)
+_VOC_NOX_FIELDS = (("voc_index", True, 10), ("nox_index", True, 10))
+_HCHO_FIELDS = (("hcho", False, 10),)
+_CO2_INT16_FIELDS = (("co2", True, 1),)  # SEN63C, SEN69C
+_CO2_UINT16_FIELDS = (("co2", False, 1),)  # SEN66
+_RAW_RHT_FIELDS = (("raw_humidity", True, 100), ("raw_temperature", True, 200))
+_RAW_VOC_NOX_FIELDS = (("raw_voc", False, 1), ("raw_nox", False, 1))
+_RAW_CO2_FIELDS = (("raw_co2", False, 1),)
+_SHT_HEATER_FIELDS = (("humidity", True, 100), ("temperature", True, 200))
+_NUMBER_CONCENTRATION_FIELDS = (
+    ("nc_pm0_5", False, 10),
+    ("nc_pm1_0", False, 10),
+    ("nc_pm2_5", False, 10),
+    ("nc_pm4_0", False, 10),
+    ("nc_pm10", False, 10),
+)
 
 # Status register bit positions (for the 32-bit status register)
 # Warning bits (upper 16 bits)
@@ -119,6 +155,18 @@ _STATUS_CO2_2_ERROR = const(9)
 _STATUS_GAS_ERROR = const(7)
 _STATUS_RHT_ERROR = const(6)
 _STATUS_FAN_ERROR = const(4)
+
+
+def _convert_word(word: int, is_int16: bool, scale: int) -> Optional[float]:
+    """Convert a raw 16-bit word to a scaled value, or None if unknown"""
+    if is_int16:
+        if word == _UNKNOWN_INT16:
+            return None
+        if word & 0x8000:
+            word -= 0x10000
+    elif word == _UNKNOWN_UINT16:
+        return None
+    return word / scale
 
 
 class DeviceStatus:
@@ -138,16 +186,17 @@ class DeviceStatus:
 
     @property
     def co2_sensor_1_error(self) -> bool:
-        """CO2 sensor 1 error (SEN68 only)
+        """CO2 sensor 1 error (SEN63C, SEN69C)
 
         CO2 values might be unknown or wrong if this flag is set.
+        RH and temperature values might be out of spec due to compensation algorithms.
         This is a sticky error that persists until cleared.
         """
         return bool(self._status & (1 << _STATUS_CO2_1_ERROR))
 
     @property
     def pm_sensor_error(self) -> bool:
-        """Particulate matter sensor error (SEN63C, SEN65, SEN66, SEN68)
+        """Particulate matter sensor error (all SEN6x)
 
         PM values might be unknown or wrong if this flag is set.
         RH and temperature values might be out of spec due to compensation algorithms.
@@ -157,9 +206,10 @@ class DeviceStatus:
 
     @property
     def hcho_sensor_error(self) -> bool:
-        """Formaldehyde sensor error (SEN68 only)
+        """Formaldehyde sensor error (SEN68, SEN69C)
 
         HCHO values might be unknown or wrong if this flag is set.
+        RH and temperature values might be out of spec due to compensation algorithms.
         This is a sticky error that persists until cleared.
         """
         return bool(self._status & (1 << _STATUS_HCHO_ERROR))
@@ -176,7 +226,7 @@ class DeviceStatus:
 
     @property
     def gas_sensor_error(self) -> bool:
-        """VOC/NOx gas sensor error (SEN65, SEN66, SEN68)
+        """VOC/NOx gas sensor error (SEN65, SEN66, SEN68, SEN69C)
 
         VOC index and NOx index might be unknown or wrong if this flag is set.
         RH and temperature values might be out of spec due to compensation algorithms.
@@ -186,7 +236,7 @@ class DeviceStatus:
 
     @property
     def rht_sensor_error(self) -> bool:
-        """Relative humidity and temperature sensor error (SEN63C, SEN65, SEN66, SEN68)
+        """Relative humidity and temperature sensor error (all SEN6x)
 
         Temperature and humidity values might be unknown or wrong if this flag is set.
         Other measured values might be out of spec due to compensation algorithms.
@@ -250,15 +300,31 @@ class DeviceStatus:
 
 
 class SEN6x:  # noqa: PLR0904
-    """Base class for Sensirion SEN6x environmental sensors"""
+    """Base class for Sensirion SEN6x environmental sensors
+
+    Use the model-specific subclass (:class:`SEN62`, :class:`SEN63C`, :class:`SEN65`,
+    :class:`SEN66`, :class:`SEN68` or :class:`SEN69C`) matching your sensor, since
+    each model uses different commands and data layouts for reading measurements.
+    """
+
+    # Overridden by each model
+    _MEASUREMENT_COMMAND: Optional[int] = None
+    _MEASUREMENT_FIELDS: Tuple = ()
+    _RAW_VALUES_COMMAND: Optional[int] = None
+    _RAW_VALUES_FIELDS: Tuple = ()
+    # First firmware version supporting Get SHT Heater Measurements
+    _SHT_HEATER_POLL_FIRMWARE: Tuple[int, int] = (0, 0)
+    # CO2 conditioning period after measurement start (SEN63C, SEN69C)
+    _CO2_CONDITIONING_TIME: float = 0
 
     def __init__(self, i2c: I2C, address: int = SEN6X_I2C_ADDRESS) -> None:
         self.i2c_device: I2CDevice = I2CDevice(i2c, address)
         self._serial_number: Optional[str] = None
         self._product_name: Optional[str] = None
+        self._firmware_version: Optional[Tuple[int, int]] = None
         self._measurement_started: bool = False
         self._measurement_data: Optional[Dict[str, Optional[float]]] = None
-        self._measurement_time: Optional[float] = None
+        self._measurement_start_time: Optional[float] = None
 
         # Allow sensor to complete startup
         time.sleep(_SENSOR_STARTUP_TIME)
@@ -325,6 +391,49 @@ class SEN6x:  # noqa: PLR0904
 
         return data
 
+    def _read_values(self, command: int, fields: Tuple) -> Dict[str, Optional[float]]:
+        """Send a read command and decode the returned words using a field layout"""
+        self._write_command(command)
+        data = self._read_data(len(fields), execution_time=_TIME_READ_MEASUREMENT)
+        return {
+            name: _convert_word(word, is_int16, scale)
+            for (name, is_int16, scale), word in zip(fields, data)
+        }
+
+    def _read_string(self, command: int) -> str:
+        """Read a null-terminated string<32> (16 words)"""
+        self._write_command(command)
+        data = self._read_data(16, execution_time=_TIME_STANDARD)
+        raw = b"".join(struct.pack(">H", word) for word in data)
+        return raw.split(b"\x00")[0].decode("utf-8")
+
+    def _require_measuring(self) -> None:
+        """Raise if the sensor is not in measurement mode"""
+        if not self._measurement_started:
+            raise RuntimeError(
+                "Sensor must be in measurement mode. Call start_measurement() first."
+            )
+
+    def _require_idle(self, action: str) -> None:
+        """Raise if the sensor is in measurement mode"""
+        if self._measurement_started:
+            raise RuntimeError(f"Cannot {action} while measuring. Call stop_measurement() first.")
+
+    def _check_co2_conditioning(self, action: str) -> None:
+        """Raise if still inside the SEN63C/SEN69C CO2 conditioning period
+
+        Interrupting the conditioning that runs during the first 24 seconds of a
+        measurement causes a CO2-1 sensor error.
+        """
+        if not self._CO2_CONDITIONING_TIME or self._measurement_start_time is None:
+            return
+        remaining = self._measurement_start_time + self._CO2_CONDITIONING_TIME - time.monotonic()
+        if remaining > 0:
+            raise RuntimeError(
+                f"Cannot {action} during the CO2 sensor conditioning period, "
+                f"wait {remaining:.1f}s more"
+            )
+
     @staticmethod
     def _crc8(data: bytes) -> int:
         """Calculate CRC8 for Sensirion sensors
@@ -346,14 +455,16 @@ class SEN6x:  # noqa: PLR0904
     def reset(self) -> None:
         """Reset the sensor
 
+        Has the same effect as a power cycle. Measurement is stopped first if running.
         After reset, the sensor needs time to start up before accepting commands.
-        All configuration parameters are reset to default values.
+        All volatile configuration parameters are reset to default values.
         """
+        self.stop_measurement()
         self._write_command(_RESET, execution_time=_TIME_RESET)
-        self._measurement_started = False
         # Clear cached values
         self._serial_number = None
         self._product_name = None
+        self._measurement_data = None
         # Wait for sensor to restart
         time.sleep(_SENSOR_STARTUP_TIME)
 
@@ -362,16 +473,25 @@ class SEN6x:  # noqa: PLR0904
 
         Once started, the sensor will continuously update its readings.
         Use data_ready property to check when new data is available.
+
+        Note: SEN63C and SEN69C condition their CO2 sensor for 24 seconds after
+        starting a measurement. A measurement may be stopped during that time, but
+        must not be started again until the 24 seconds have passed.
+
+        Raises:
+            RuntimeError: If restarted during the SEN63C/SEN69C CO2 conditioning period
         """
         if self._measurement_started:
             return
+        self._check_co2_conditioning("restart measurement")
         self._write_command(_START_MEASUREMENT, execution_time=_TIME_START_MEASUREMENT)
         self._measurement_started = True
+        self._measurement_start_time = time.monotonic()
 
     def stop_measurement(self) -> None:
         """Stop continuous measurement mode
 
-        Note: This command takes up to 1 second to execute.
+        Note: This command takes up to 1.4 seconds to execute.
         """
         if not self._measurement_started:
             return
@@ -397,28 +517,14 @@ class SEN6x:  # noqa: PLR0904
     def serial_number(self) -> str:
         """The sensor serial number as ASCII string (up to 32 characters)"""
         if self._serial_number is None:
-            self._write_command(_SERIAL_NUMBER)
-            # Serial number is string<32> (16 words max)
-            data = self._read_data(16, execution_time=_TIME_STANDARD)
-            # Convert to string, removing null termination
-            serial_bytes = b""
-            for word in data:
-                serial_bytes += struct.pack(">H", word)
-            self._serial_number = serial_bytes.decode("utf-8").rstrip("\x00")
+            self._serial_number = self._read_string(_SERIAL_NUMBER)
         return self._serial_number
 
     @property
     def product_name(self) -> str:
-        """The product name (32 bytes)"""
+        """The product name as ASCII string (up to 32 characters)"""
         if self._product_name is None:
-            self._write_command(_PRODUCT_NAME)
-            # Product name is 32 bytes (16 words)
-            data = self._read_data(16, execution_time=_TIME_STANDARD)
-            # Convert to string, removing null termination
-            name_bytes = b""
-            for word in data:
-                name_bytes += struct.pack(">H", word)
-            self._product_name = name_bytes.decode("utf-8").rstrip("\x00")
+            self._product_name = self._read_string(_PRODUCT_NAME)
         return self._product_name
 
     @property
@@ -435,15 +541,20 @@ class SEN6x:  # noqa: PLR0904
         status_value = (data[0] << 16) | data[1]
         return DeviceStatus(status_value)
 
-    def clear_device_status(self) -> None:
-        """Clear the device status register
+    def clear_device_status(self) -> DeviceStatus:
+        """Read and clear the device status register
 
         This clears all error and warning flags. Note that if the error
         condition persists, the flags will be set again. All error flags
         are "sticky" - they remain set even if the error condition goes
         away, until explicitly cleared by this command or a device reset.
+
+        Returns:
+            DeviceStatus: The device status from before it was cleared
         """
-        self._write_command(_CLEAR_DEVICE_STATUS, execution_time=_TIME_STANDARD)
+        self._write_command(_CLEAR_DEVICE_STATUS)
+        data = self._read_data(2, execution_time=_TIME_STANDARD)
+        return DeviceStatus((data[0] << 16) | data[1])
 
     def start_fan_cleaning(self) -> None:
         """Start the fan cleaning procedure
@@ -457,10 +568,7 @@ class SEN6x:  # noqa: PLR0904
         Raises:
             RuntimeError: If sensor is currently measuring
         """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot start fan cleaning while measuring. Call stop_measurement() first."
-            )
+        self._require_idle("start fan cleaning")
         self._write_command(_FAN_CLEANING, execution_time=_TIME_STANDARD)
 
     @property
@@ -470,33 +578,64 @@ class SEN6x:  # noqa: PLR0904
         Returns:
             tuple: (major_version, minor_version)
         """
-        self._write_command(_VERSION)  # version command
-        data = self._read_data(1, execution_time=_TIME_STANDARD)
+        if self._firmware_version is None:
+            self._write_command(_VERSION)
+            data = self._read_data(1, execution_time=_TIME_STANDARD)
+            # Version is packed as two bytes in one word
+            self._firmware_version = ((data[0] >> 8) & 0xFF, data[0] & 0xFF)
+        return self._firmware_version
 
-        # Version is packed as two bytes in one word
-        major = (data[0] >> 8) & 0xFF
-        minor = data[0] & 0xFF
-        return (major, minor)
+    @property
+    def sht_heater_polling_supported(self) -> bool:
+        """True if the firmware supports polling :attr:`sht_heater_measurements`
+
+        Older firmware does not support Get SHT Heater Measurements, and its
+        Activate SHT Heater command blocks for 1.3 seconds instead of 20ms.
+        """
+        return self.version >= self._SHT_HEATER_POLL_FIRMWARE
+
+    def activate_sht_heater(self) -> None:
+        """Activate the SHT sensor heater to reverse humidity creep
+
+        Heats the SHT sensor with 200mW for 1s, after which the heater switches off
+        automatically. If :attr:`sht_heater_polling_supported`, poll
+        :attr:`sht_heater_measurements` to find out when heating has finished.
+
+        Wait at least 20s after this command before starting a measurement to get
+        coherent temperature values.
+
+        Raises:
+            RuntimeError: If sensor is currently measuring
+        """
+        self._require_idle("activate SHT heater")
+        execution_time = _TIME_STANDARD if self.sht_heater_polling_supported else _TIME_SHT_HEATER
+        self._write_command(_ACTIVATE_SHT_HEATER, execution_time=execution_time)
 
     @property
     def sht_heater_measurements(self) -> Dict[str, Optional[float]]:
-        """Measurements when SHT heater is active (firmware >= 4.0)
+        """SHT sensor measurements once heating from :meth:`activate_sht_heater` is finished
 
-        Returns heating progress measurements. If heating not finished,
-        returns None values.
+        Can be polled every 50ms after activating the heater. Values are None
+        until heating is finished.
+
+        Requires firmware SEN62 >= 6.0, SEN63C >= 5.0, SEN65 >= 5.0, SEN66 >= 4.0,
+        SEN68 >= 7.0 or SEN69C >= 9.0.
 
         Returns:
             dict: {'humidity': value or None, 'temperature': value or None}
+
+        Raises:
+            RuntimeError: If sensor is measuring or firmware does not support this command
         """
+        self._require_idle("read SHT heater measurements")
+        if not self.sht_heater_polling_supported:
+            major, minor = self._SHT_HEATER_POLL_FIRMWARE
+            raise RuntimeError(f"SHT heater measurements require firmware >= {major}.{minor}")
         self._write_command(_SHT_HEATER)
         data = self._read_data(2, execution_time=_TIME_STANDARD)
-
-        temp_scale = 200.0
-        humidity_scale = 100.0
-
         return {
-            "humidity": None if data[0] == _UNKNOWN_VALUE else data[0] / humidity_scale,
-            "temperature": None if data[1] == _UNKNOWN_VALUE else data[1] / temp_scale,
+            name: _convert_word(word, is_int16, scale)
+            for (name, is_int16, scale), word in zip(_SHT_HEATER_FIELDS, data)
         }
 
     def check_sensor_errors(self) -> None:
@@ -520,6 +659,10 @@ class SEN6x:  # noqa: PLR0904
             errors.append("Gas sensor")
         if status.rht_sensor_error:
             errors.append("RH&T sensor")
+        if status.co2_sensor_1_error or status.co2_sensor_2_error:
+            errors.append("CO2 sensor")
+        if status.hcho_sensor_error:
+            errors.append("HCHO sensor")
 
         if errors:
             raise RuntimeError(f"Sensor errors detected: {', '.join(errors)}")
@@ -542,10 +685,63 @@ class SEN6x:  # noqa: PLR0904
             errors["gas"] = "VOC/NOx indices unreliable, RH&T may be affected"
         if status.rht_sensor_error:
             errors["rht"] = "Temperature/humidity unreliable, other values may be affected"
-        if status.co2_sensor_2_error:
+        if status.co2_sensor_1_error or status.co2_sensor_2_error:
             errors["co2"] = "CO2 values unreliable, RH&T may be affected"
+        if status.hcho_sensor_error:
+            errors["hcho"] = "Formaldehyde values unreliable, RH&T may be affected"
 
         return errors
+
+    def all_measurements(self) -> Dict[str, Optional[float]]:
+        """All measurement values for this sensor model
+
+        Must be called when sensor is in measurement mode. Use :attr:`data_ready`
+        to check if new data is available, otherwise the previous values are returned.
+        Unknown values (e.g. while a sensor is still starting up) are None.
+
+        Keys present depend on the model:
+
+        - pm1_0, pm2_5, pm4_0, pm10: Mass concentration (µg/m³), all models
+        - humidity: Relative humidity (%), all models
+        - temperature: Temperature (°C), all models
+        - voc_index, nox_index: VOC/NOx index (1.0-500.0), SEN65, SEN66, SEN68, SEN69C
+        - hcho: Formaldehyde concentration (ppb), SEN68, SEN69C
+        - co2: CO2 concentration (ppm), SEN63C, SEN66, SEN69C
+
+        Returns:
+            dict: Measurement name to value or None if unknown
+
+        Raises:
+            RuntimeError: If sensor is not in measurement mode
+        """
+        if self._MEASUREMENT_COMMAND is None:
+            raise NotImplementedError("Use the model-specific class, e.g. SEN66")
+        self._require_measuring()
+        self._measurement_data = self._read_values(
+            self._MEASUREMENT_COMMAND, self._MEASUREMENT_FIELDS
+        )
+        return self._measurement_data
+
+    def raw_values(self) -> Dict[str, Optional[float]]:
+        """Raw sensor values for this sensor model
+
+        Keys present depend on the model:
+
+        - raw_humidity: Raw humidity (%), all models
+        - raw_temperature: Raw temperature (°C), all models
+        - raw_voc, raw_nox: Raw VOC/NOx ticks (no scale), SEN65, SEN66, SEN68, SEN69C
+        - raw_co2: Raw CO2 concentration (ppm, not interpolated, updated every 5s), SEN66
+
+        Returns:
+            dict: Raw value name to value or None if unknown
+
+        Raises:
+            RuntimeError: If sensor is not in measurement mode
+        """
+        if self._RAW_VALUES_COMMAND is None:
+            raise NotImplementedError("Use the model-specific class, e.g. SEN66")
+        self._require_measuring()
+        return self._read_values(self._RAW_VALUES_COMMAND, self._RAW_VALUES_FIELDS)
 
     def number_concentration(self) -> Dict[str, Optional[float]]:
         """Particle number concentration values
@@ -558,23 +754,8 @@ class SEN6x:  # noqa: PLR0904
                 - nc_pm4_0: PM4.0 number concentration
                 - nc_pm10: PM10 number concentration
         """
-        if not self._measurement_started:
-            raise RuntimeError(
-                "Sensor must be in measurement mode. Call start_measurement() first."
-            )
-
-        self._write_command(_READ_NUMBER_CONCENTRATION)
-        data = self._read_data(5, execution_time=_TIME_READ_MEASUREMENT)
-
-        nc_scale = 10.0
-
-        return {
-            "nc_pm0_5": None if data[0] == _UNKNOWN_VALUE else data[0] / nc_scale,
-            "nc_pm1_0": None if data[1] == _UNKNOWN_VALUE else data[1] / nc_scale,
-            "nc_pm2_5": None if data[2] == _UNKNOWN_VALUE else data[2] / nc_scale,
-            "nc_pm4_0": None if data[3] == _UNKNOWN_VALUE else data[3] / nc_scale,
-            "nc_pm10": None if data[4] == _UNKNOWN_VALUE else data[4] / nc_scale,
-        }
+        self._require_measuring()
+        return self._read_values(_READ_NUMBER_CONCENTRATION, _NUMBER_CONCENTRATION_FIELDS)
 
     def temperature_offset(
         self, offset: float = 0.0, slope: float = 0.0, time_constant: int = 0, slot: int = 0
@@ -593,10 +774,14 @@ class SEN6x:  # noqa: PLR0904
         """
         if not 0 <= slot <= 4:
             raise ValueError("Slot must be 0-4")
+        if not 0 <= time_constant <= 0xFFFF:
+            raise ValueError("time_constant must be 0-65535 seconds")
 
-        # Scale factors - these are signed values
-        offset_scaled = int(offset * 200)
-        slope_scaled = int(slope * 10000)
+        # Scale factors - these are signed int16 values
+        offset_scaled = round(offset * 200)
+        slope_scaled = round(slope * 10000)
+        if not -32768 <= offset_scaled <= 32767 or not -32768 <= slope_scaled <= 32767:
+            raise ValueError("offset or slope out of range")
 
         # Convert signed to unsigned for I2C transmission
         offset_scaled &= 0xFFFF
@@ -621,24 +806,281 @@ class SEN6x:  # noqa: PLR0904
         Note: Configuration is volatile and reset to defaults after power cycle.
         Must be called in idle mode.
         """
-        if self._measurement_started:
-            raise RuntimeError("Cannot set temperature acceleration while measuring.")
+        self._require_idle("set temperature acceleration")
 
         # Scale factors (multiply by 10 for protocol)
-        k_scaled = int(k * 10)
-        p_scaled = int(p * 10)
-        t1_scaled = int(t1 * 10)
-        t2_scaled = int(t2 * 10)
-
-        data = [k_scaled, p_scaled, t1_scaled, t2_scaled]
+        data = [round(value * 10) for value in (k, p, t1, t2)]
+        if not all(0 <= value <= 0xFFFF for value in data):
+            raise ValueError("Temperature acceleration parameters must be 0-6553.5")
         self._write_command(_TEMP_ACCELERATION, data=data, execution_time=_TIME_STANDARD)
+
+    @property
+    def temperature(self) -> Optional[float]:
+        """Temperature in Celsius"""
+        self.all_measurements()
+        return self._measurement_data["temperature"] if self._measurement_data else None
+
+    @property
+    def humidity(self) -> Optional[float]:
+        """Relative humidity in percent"""
+        self.all_measurements()
+        return self._measurement_data["humidity"] if self._measurement_data else None
+
+    @property
+    def pm1_0(self) -> Optional[float]:
+        """PM1.0 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm1_0"] if self._measurement_data else None
+
+    @property
+    def pm2_5(self) -> Optional[float]:
+        """PM2.5 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm2_5"] if self._measurement_data else None
+
+    @property
+    def pm4_0(self) -> Optional[float]:
+        """PM4.0 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm4_0"] if self._measurement_data else None
+
+    @property
+    def pm10(self) -> Optional[float]:
+        """PM10 concentration in µg/m³"""
+        self.all_measurements()
+        return self._measurement_data["pm10"] if self._measurement_data else None
+
+
+class VOCNOxMixin:
+    """VOC and NOx index features (SEN65, SEN66, SEN68, SEN69C)"""
+
+    @property
+    def voc_index(self) -> Optional[float]:
+        """VOC index (1.0-500.0)"""
+        self.all_measurements()
+        return self._measurement_data["voc_index"] if self._measurement_data else None
+
+    @property
+    def nox_index(self) -> Optional[float]:
+        """NOx index (1.0-500.0)
+
+        Unknown (None) for the first 10-11 seconds after power-on or reset.
+        """
+        self.all_measurements()
+        return self._measurement_data["nox_index"] if self._measurement_data else None
+
+    @property
+    def voc_algorithm_state(self) -> bytes:
+        """VOC algorithm state for backup/restore
+
+        Can be called in either idle or measurement mode. In measurement mode,
+        returns the current state. In idle mode, returns the state from when
+        measurement was stopped.
+
+        Returns:
+            bytes: 8-byte algorithm state that can be restored later
+        """
+        self._write_command(_VOC_STATE)
+        data = self._read_data(4, execution_time=_TIME_STANDARD)  # 4 words = 8 bytes
+
+        # Convert words to bytes
+        state = b""
+        for word in data:
+            state += struct.pack(">H", word)
+        return state
+
+    @voc_algorithm_state.setter
+    def voc_algorithm_state(self, state: bytes) -> None:
+        """Restore VOC algorithm state from backup
+
+        Allows skipping the initial VOC learning phase after power cycle.
+        Must be called in idle mode before starting measurement.
+
+        Args:
+            state: 8-byte algorithm state from get_voc_algorithm_state()
+
+        Note: Only works in idle mode, applied when measurement starts
+        """
+        self._require_idle("set VOC state")
+
+        if len(state) != 8:
+            raise ValueError("State must be exactly 8 bytes")
+
+        # Convert bytes to words
+        data: List[int] = []
+        for i in range(0, 8, 2):
+            data.append(struct.unpack(">H", state[i : i + 2])[0])
+
+        self._write_command(_VOC_STATE, data=data, execution_time=_TIME_STANDARD)
+
+    @property
+    def voc_algorithm(self) -> Dict[str, int]:
+        """VOC algorithm tuning parameters
+
+        Returns:
+            dict: Current VOC algorithm parameters
+        """
+        self._require_idle("read VOC tuning")
+
+        self._write_command(_VOC_TUNING)
+        data = self._read_data(6, execution_time=_TIME_STANDARD)
+
+        return {
+            "index_offset": data[0],
+            "learning_time_offset_hours": data[1],
+            "learning_time_gain_hours": data[2],
+            "gating_max_duration_minutes": data[3],
+            "std_initial": data[4],
+            "gain_factor": data[5],
+        }
+
+    def voc_algorithm_tuning(  # noqa: PLR0913 PLR0917
+        self,
+        index_offset: int = 100,
+        learning_time_offset_hours: int = 12,
+        learning_time_gain_hours: int = 12,
+        gating_max_duration_minutes: int = 180,
+        std_initial: int = 50,
+        gain_factor: int = 230,
+    ) -> None:
+        """VOC algorithm tuning parameters
+
+        Args:
+            index_offset: VOC index for average conditions (1-250, default: 100)
+            learning_time_offset_hours: Time constant for offset learning (1-1000, default: 12)
+            learning_time_gain_hours: Time constant for gain learning (1-1000, default: 12)
+            gating_max_duration_minutes: Max gating duration (0-3000, default: 180, 0=disabled)
+            std_initial: Initial standard deviation (10-5000, default: 50)
+            gain_factor: Output gain factor (1-1000, default: 230)
+
+        Note: Configuration is volatile and reset to defaults after power cycle
+        """
+        self._require_idle("set VOC tuning")
+
+        # Validate ranges
+        if not 1 <= index_offset <= 250:
+            raise ValueError("index_offset must be 1-250")
+        if not 1 <= learning_time_offset_hours <= 1000:
+            raise ValueError("learning_time_offset_hours must be 1-1000")
+        if not 1 <= learning_time_gain_hours <= 1000:
+            raise ValueError("learning_time_gain_hours must be 1-1000")
+        if not 0 <= gating_max_duration_minutes <= 3000:
+            raise ValueError("gating_max_duration_minutes must be 0-3000")
+        if not 10 <= std_initial <= 5000:
+            raise ValueError("std_initial must be 10-5000")
+        if not 1 <= gain_factor <= 1000:
+            raise ValueError("gain_factor must be 1-1000")
+
+        data = [
+            index_offset,
+            learning_time_offset_hours,
+            learning_time_gain_hours,
+            gating_max_duration_minutes,
+            std_initial,
+            gain_factor,
+        ]
+        self._write_command(_VOC_TUNING, data=data, execution_time=_TIME_STANDARD)
+
+    @property
+    def nox_algorithm(self) -> Dict[str, int]:
+        """NOx algorithm tuning parameters
+
+        Returns:
+            dict: Current NOx algorithm parameters
+        """
+        self._require_idle("read NOx tuning")
+
+        self._write_command(_NOX_TUNING)
+        data = self._read_data(6, execution_time=_TIME_STANDARD)
+
+        return {
+            "index_offset": data[0],
+            "learning_time_offset_hours": data[1],
+            "learning_time_gain_hours": data[2],  # No effect for NOx
+            "gating_max_duration_minutes": data[3],
+            "std_initial": data[4],  # No effect for NOx
+            "gain_factor": data[5],
+        }
+
+    def nox_algorithm_tuning(
+        self,
+        index_offset: int = 1,
+        learning_time_offset_hours: int = 12,
+        gating_max_duration_minutes: int = 720,
+        gain_factor: int = 230,
+    ) -> None:
+        """NOx algorithm tuning parameters
+
+        Args:
+            index_offset: NOx index for average conditions (1-250, default: 1)
+            learning_time_offset_hours: Time constant for offset learning (1-1000, default: 12)
+            gating_max_duration_minutes: Max gating duration (0-3000, default: 720, 0=disabled)
+            gain_factor: Output gain factor (1-1000, default: 230)
+
+        Note: learning_time_gain_hours is fixed at 12, std_initial is fixed at 50 for NOx.
+        Configuration is volatile and reset to defaults after power cycle.
+        """
+        self._require_idle("set NOx tuning")
+
+        # Validate ranges
+        if not 1 <= index_offset <= 250:
+            raise ValueError("index_offset must be 1-250")
+        if not 1 <= learning_time_offset_hours <= 1000:
+            raise ValueError("learning_time_offset_hours must be 1-1000")
+        if not 0 <= gating_max_duration_minutes <= 3000:
+            raise ValueError("gating_max_duration_minutes must be 0-3000")
+        if not 1 <= gain_factor <= 1000:
+            raise ValueError("gain_factor must be 1-1000")
+
+        # Fixed parameters for NOx
+        learning_time_gain_hours = 12  # Must be 12 for NOx
+        std_initial = 50  # Must be 50 for NOx
+
+        data = [
+            index_offset,
+            learning_time_offset_hours,
+            learning_time_gain_hours,
+            gating_max_duration_minutes,
+            std_initial,
+            gain_factor,
+        ]
+        self._write_command(_NOX_TUNING, data=data, execution_time=_TIME_STANDARD)
+
+
+class FormaldehydeMixin:
+    """Formaldehyde (HCHO) features (SEN68, SEN69C)"""
+
+    @property
+    def hcho(self) -> Optional[float]:
+        """Formaldehyde concentration in ppb
+
+        Unknown (None) for the first 60 seconds after the first measurement
+        start after power-on or reset.
+        """
+        self.all_measurements()
+        return self._measurement_data["hcho"] if self._measurement_data else None
+
+
+class CO2Mixin:
+    """CO2 sensor features (SEN63C, SEN66, SEN69C)"""
+
+    @property
+    def co2(self) -> Optional[float]:
+        """CO2 concentration in ppm
+
+        Unknown (None) for the first 5-6 seconds (SEN66) or 22-24 seconds
+        (SEN63C, SEN69C) after starting a measurement.
+        """
+        self.all_measurements()
+        return self._measurement_data["co2"] if self._measurement_data else None
 
     def force_co2_recalibration(self, target_co2_ppm: int) -> Optional[int]:
         """Perform forced CO2 recalibration (FRC)
 
         Forces the CO2 sensor to recalibrate to a known reference concentration.
-        This should be done when the sensor is in a controlled environment with
-        a known CO2 concentration (e.g., fresh outdoor air at ~420 ppm).
+        Operate the sensor for at least 3 minutes in an environment with a
+        homogeneous and constant CO2 concentration (e.g., fresh outdoor air at
+        ~420 ppm), then call stop_measurement() before calling this.
 
         Args:
             target_co2_ppm: Known CO2 concentration in ppm at current location
@@ -647,15 +1089,13 @@ class SEN6x:  # noqa: PLR0904
             int: CO2 correction applied in ppm, or None if recalibration failed
 
         Raises:
-            RuntimeError: If sensor is currently measuring
+            RuntimeError: If sensor is currently measuring, or within the
+                SEN63C/SEN69C CO2 conditioning period
 
-        Note: Sensor must be in idle mode. Wait at least 1000ms after power-on
-        or 600ms after stop_measurement() before calling this.
+        Note: This calibration is persistent across resets and power cycles.
         """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot recalibrate CO2 while measuring. Call stop_measurement() first."
-            )
+        self._require_idle("recalibrate CO2")
+        self._check_co2_conditioning("recalibrate CO2")
 
         # Send target CO2 concentration
         self._write_command(
@@ -666,12 +1106,27 @@ class SEN6x:  # noqa: PLR0904
         data = self._read_data(1, execution_time=0)  # No additional wait, already waited 500ms
 
         # Check if recalibration failed
-        if data[0] == 0xFFFF:
+        if data[0] == _UNKNOWN_UINT16:
             return None
 
         # Calculate actual correction: correction = return_value - 0x8000
         correction = data[0] - 0x8000
         return correction
+
+    def co2_factory_reset(self) -> None:
+        """Perform a CO2 sensor factory reset
+
+        Resets all CO2 sensor configuration stored in EEPROM and erases the forced
+        recalibration (FRC) and automatic self-calibration (ASC) history, restarting
+        the bypass phase. Requires SEN66 firmware >= 1.2.
+
+        Raises:
+            RuntimeError: If sensor is currently measuring, or within the
+                SEN63C/SEN69C CO2 conditioning period
+        """
+        self._require_idle("reset the CO2 sensor")
+        self._check_co2_conditioning("reset the CO2 sensor")
+        self._write_command(_CO2_FACTORY_RESET, execution_time=_TIME_CO2_FACTORY_RESET)
 
     @property
     def co2_automatic_self_calibration(self) -> bool:
@@ -680,10 +1135,7 @@ class SEN6x:  # noqa: PLR0904
         Returns:
             bool: True if ASC is enabled, False if disabled
         """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot read CO2 ASC while measuring. Call stop_measurement() first."
-            )
+        self._require_idle("read CO2 ASC")
 
         self._write_command(_CO2_AUTO_CALIB)
         data = self._read_data(1, execution_time=_TIME_STANDARD)
@@ -697,16 +1149,16 @@ class SEN6x:  # noqa: PLR0904
         """CO2 sensor automatic self-calibration (ASC) status
 
         ASC assumes the sensor is exposed to fresh air (~400 ppm) at least
-        once every few days. Enable for office/home use, disable for
-        greenhouses or continuously occupied spaces.
+        once per week. Only disable for testing under lab conditions where
+        concentrations below 400 ppm are expected.
 
         Args:
             enabled: True to enable ASC, False to disable
 
         Note: Default is enabled. Setting is volatile (reset on power cycle).
         """
-        if self._measurement_started:
-            raise RuntimeError("Cannot set CO2 ASC while measuring. Call stop_measurement() first.")
+        self._require_idle("set CO2 ASC")
+        self._check_co2_conditioning("set CO2 ASC")
 
         # Pack padding byte (0x00) and status byte into one word
         status_word = 0x0001 if enabled else 0x0000
@@ -750,10 +1202,7 @@ class SEN6x:  # noqa: PLR0904
         Returns:
             int: Current sensor altitude in meters above sea level
         """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot read altitude while measuring. Call stop_measurement() first."
-            )
+        self._require_idle("read altitude")
 
         self._write_command(_SENSOR_ALTITUDE)
         data = self._read_data(1, execution_time=_TIME_STANDARD)
@@ -775,488 +1224,79 @@ class SEN6x:  # noqa: PLR0904
 
         Note: Setting is volatile (reset to 0m on power cycle).
         """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot set altitude while measuring. Call stop_measurement() first."
-            )
+        self._require_idle("set altitude")
 
         if not 0 <= altitude_m <= 3000:
             raise ValueError("Altitude must be 0-3000 meters")
 
         self._write_command(_SENSOR_ALTITUDE, data=[altitude_m], execution_time=_TIME_STANDARD)
 
-    def activate_sht_heater(self) -> None:
-        """Activate the SHT sensor heater to reverse humidity creep
 
-        Raises:
-            RuntimeError: If sensor is currently measuring
-        """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot activate SHT heater while measuring. Call stop_measurement() first."
-            )
+class SEN62(SEN6x):
+    """Driver for SEN62 sensor - measures PM, RH, and Temperature"""
 
-        self._write_command(_ACTIVATE_SHT_HEATER, execution_time=_TIME_STANDARD)
+    _MEASUREMENT_COMMAND = _SEN62_READ_MEASUREMENT
+    _MEASUREMENT_FIELDS = _PM_RHT_FIELDS
+    _RAW_VALUES_COMMAND = _SEN62_SEN63C_READ_RAW_VALUES
+    _RAW_VALUES_FIELDS = _RAW_RHT_FIELDS
+    _SHT_HEATER_POLL_FIRMWARE = (6, 0)
 
-    @property
-    def temperature(self) -> Optional[float]:
-        """Temperature in Celsius"""
-        self.all_measurements()
-        return self._measurement_data["temperature"] if self._measurement_data else None
 
-    @property
-    def humidity(self) -> Optional[float]:
-        """Relative humidity in percent"""
-        self.all_measurements()
-        return self._measurement_data["humidity"] if self._measurement_data else None
-
-    @property
-    def pm1_0(self) -> Optional[float]:
-        """PM1.0 concentration in µg/m³"""
-        self.all_measurements()
-        return self._measurement_data["pm1_0"] if self._measurement_data else None
-
-    @property
-    def pm2_5(self) -> Optional[float]:
-        """PM2.5 concentration in µg/m³"""
-        self.all_measurements()
-        return self._measurement_data["pm2_5"] if self._measurement_data else None
-
-    @property
-    def pm4_0(self) -> Optional[float]:
-        """PM4.0 concentration in µg/m³"""
-        self.all_measurements()
-        return self._measurement_data["pm4_0"] if self._measurement_data else None
-
-    @property
-    def pm10(self) -> Optional[float]:
-        """PM10 concentration in µg/m³"""
-        self.all_measurements()
-        return self._measurement_data["pm10"] if self._measurement_data else None
-
-    @property
-    def co2(self) -> Optional[float]:
-        """CO2 concentration in ppm
-
-        Applies to: SEN63C, SEN66, SEN69C
-        """
-        self.all_measurements()
-        return self._measurement_data.get("co2") if self._measurement_data else None
-
-    @property
-    def voc_index(self) -> Optional[float]:
-        """VOC index (1.0-500.0)
-
-        Applies to: SEN65, SEN66, SEN68, SEN69C
-        """
-        self.all_measurements()
-        return self._measurement_data.get("voc_index") if self._measurement_data else None
-
-    @property
-    def nox_index(self) -> Optional[float]:
-        """NOx index (1.0-500.0)
-
-        Applies to: SEN65, SEN66, SEN68, SEN69C
-        """
-        self.all_measurements()
-        return self._measurement_data.get("nox_index") if self._measurement_data else None
-
-
-class SEN66(SEN6x):  # noqa: PLR0904
-    """Driver for SEN66 sensor - measures PM, VOC, NOx, CO2, RH, and Temperature"""
-
-    def all_measurements(self) -> Dict[str, Optional[float]]:
-        """All measurement values from SEN66
-
-        Must be called when sensor is in measurement mode and data is ready.
-        Note: CO2 values will be 0xFFFF for first 5-6 seconds after measurement start.
-        Note: NOx values will be 0x7FFF for first 10-11 seconds after power-on/reset.
-
-        Returns:
-            dict:
-                - pm1_0: PM1.0 concentration (µg/m³) or None if unknown
-                - pm2_5: PM2.5 concentration (µg/m³) or None if unknown
-                - pm4_0: PM4.0 concentration (µg/m³) or None if unknown
-                - pm10: PM10 concentration (µg/m³) or None if unknown
-                - humidity: Relative humidity (%) or None if unknown
-                - temperature: Temperature (°C) or None if unknown
-                - voc_index: VOC index (1.0-500.0) or None if unknown
-                - nox_index: NOx index (1.0-500.0) or None if unknown
-                - co2: CO2 concentration (ppm) or None if unknown
-
-        Raises:
-            RuntimeError: If sensor is not in measurement mode
-        """
-        if not self._measurement_started:
-            raise RuntimeError(
-                "Sensor must be in measurement mode. Call start_measurement() first."
-            )
-
-        self._write_command(_SEN66_READ_MEASUREMENT)
-
-        # SEN66 returns 9 values (9 words) - includes CO2
-        data = self._read_data(9, execution_time=_TIME_READ_MEASUREMENT)
-
-        # Scale factors from datasheet
-        pm_scale = 10.0
-        temp_scale = 200.0
-        humidity_scale = 100.0
-        voc_nox_scale = 10.0
-
-        # Track measurement time for startup detection
-        if self._measurement_time is None:
-            self._measurement_time = time.monotonic()
-
-        # Process PM values (uint16, 0xFFFF = unknown)
-        pm1_0: Optional[float] = None if data[0] == _UNKNOWN_VALUE else data[0] / pm_scale
-        pm2_5: Optional[float] = None if data[1] == _UNKNOWN_VALUE else data[1] / pm_scale
-        pm4_0: Optional[float] = None if data[2] == _UNKNOWN_VALUE else data[2] / pm_scale
-        pm10: Optional[float] = None if data[3] == _UNKNOWN_VALUE else data[3] / pm_scale
-
-        # Process RH&T values (int16, 0x7FFF = unknown)
-        humidity: Optional[float] = None if data[4] == _UNKNOWN_VALUE else data[4] / humidity_scale
-        temperature: Optional[float] = None if data[5] == _UNKNOWN_VALUE else data[5] / temp_scale
-
-        # Process VOC/NOx indices (int16, 0x7FFF = unknown)
-        voc_index: Optional[float] = None if data[6] == _UNKNOWN_VALUE else data[6] / voc_nox_scale
-        nox_index: Optional[float] = None if data[7] == _UNKNOWN_VALUE else data[7] / voc_nox_scale
-
-        # Process CO2 (uint16, 0xFFFF = unknown)
-        co2: Optional[float] = None if data[8] == _UNKNOWN_VALUE else float(data[8])
-
-        self._measurement_data = {
-            "pm1_0": pm1_0,
-            "pm2_5": pm2_5,
-            "pm4_0": pm4_0,
-            "pm10": pm10,
-            "humidity": humidity,
-            "temperature": temperature,
-            "voc_index": voc_index,
-            "nox_index": nox_index,
-            "co2": co2,
-        }
-
-        return self._measurement_data
-
-    def _check_measurements(self) -> None:
-        """Ensure measurements have been read"""
-        if self._measurement_data is None:
-            self._measurement_data = self.all_measurements()
-
-    def raw_values(self) -> Dict[str, Optional[float]]:
-        """Raw sensor values from SEN66
-
-        Returns:
-            dict:
-                - raw_humidity: Raw humidity (%)
-                - raw_temperature: Raw temperature (°C)
-                - raw_voc: Raw VOC ticks (no scale)
-                - raw_nox: Raw NOx ticks (no scale)
-                - raw_co2: Raw CO2 concentration (ppm, updated every 5s)
-        """
-        if not self._measurement_started:
-            raise RuntimeError(
-                "Sensor must be in measurement mode. Call start_measurement() first."
-            )
-
-        self._write_command(_SEN66_READ_RAW_VALUES)
-        data = self._read_data(5, execution_time=_TIME_READ_MEASUREMENT)
-
-        temp_scale = 200.0
-        humidity_scale = 100.0
-
-        return {
-            "raw_humidity": None if data[0] == _UNKNOWN_VALUE else data[0] / humidity_scale,
-            "raw_temperature": None if data[1] == _UNKNOWN_VALUE else data[1] / temp_scale,
-            "raw_voc": None if data[2] == _UNKNOWN_VALUE else float(data[2]),
-            "raw_nox": None if data[3] == _UNKNOWN_VALUE else float(data[3]),
-            "raw_co2": None if data[4] == _UNKNOWN_VALUE else float(data[4]),
-        }
-
-    @property
-    def voc_algorithm_state(self) -> bytes:
-        """VOC algorithm state for backup/restore
-
-        Can be called in either idle or measurement mode. In measurement mode,
-        returns the current state. In idle mode, returns the state from when
-        measurement was stopped.
-
-        Returns:
-            bytes: 8-byte algorithm state that can be restored later
-        """
-        self._write_command(_VOC_STATE)
-        data = self._read_data(4, execution_time=_TIME_STANDARD)  # 4 words = 8 bytes
-
-        # Convert words to bytes
-        state = b""
-        for word in data:
-            state += struct.pack(">H", word)
-        return state
-
-    @voc_algorithm_state.setter
-    def voc_algorithm_state(self, state: bytes) -> None:
-        """Restore VOC algorithm state from backup
-
-        Allows skipping the initial VOC learning phase after power cycle.
-        Must be called in idle mode before starting measurement.
-
-        Args:
-            state: 8-byte algorithm state from get_voc_algorithm_state()
-
-        Note: Only works in idle mode, applied when measurement starts
-        """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot set VOC state while measuring. Call stop_measurement() first."
-            )
-
-        if len(state) != 8:
-            raise ValueError("State must be exactly 8 bytes")
-
-        # Convert bytes to words
-        data: List[int] = []
-        for i in range(0, 8, 2):
-            data.append(struct.unpack(">H", state[i : i + 2])[0])
-
-        self._write_command(_VOC_STATE, data=data, execution_time=_TIME_STANDARD)
-
-    @property
-    def voc_algorithm(self) -> Dict[str, int]:
-        """VOC algorithm tuning parameters
-
-        Returns:
-            dict: Current VOC algorithm parameters
-        """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot read VOC tuning while measuring. Call stop_measurement() first."
-            )
-
-        self._write_command(_VOC_TUNING)
-        data = self._read_data(6, execution_time=_TIME_STANDARD)
-
-        return {
-            "index_offset": data[0],
-            "learning_time_offset_hours": data[1],
-            "learning_time_gain_hours": data[2],
-            "gating_max_duration_minutes": data[3],
-            "std_initial": data[4],
-            "gain_factor": data[5],
-        }
-
-    def voc_algorithm_tuning(  # noqa: PLR0913 PLR0917
-        self,
-        index_offset: int = 100,
-        learning_time_offset_hours: int = 12,
-        learning_time_gain_hours: int = 12,
-        gating_max_duration_minutes: int = 180,
-        std_initial: int = 50,
-        gain_factor: int = 230,
-    ) -> None:
-        """VOC algorithm tuning parameters
-
-        Args:
-            index_offset: VOC index for average conditions (1-250, default: 100)
-            learning_time_offset_hours: Time constant for offset learning (1-1000, default: 12)
-            learning_time_gain_hours: Time constant for gain learning (1-1000, default: 12)
-            gating_max_duration_minutes: Max gating duration (0-3000, default: 180, 0=disabled)
-            std_initial: Initial standard deviation (10-5000, default: 50)
-            gain_factor: Output gain factor (1-1000, default: 230)
-
-        Note: Configuration is volatile and reset to defaults after power cycle
-        """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot set VOC tuning while measuring. Call stop_measurement() first."
-            )
-
-        # Validate ranges
-        if not 1 <= index_offset <= 250:
-            raise ValueError("index_offset must be 1-250")
-        if not 1 <= learning_time_offset_hours <= 1000:
-            raise ValueError("learning_time_offset_hours must be 1-1000")
-        if not 1 <= learning_time_gain_hours <= 1000:
-            raise ValueError("learning_time_gain_hours must be 1-1000")
-        if not 0 <= gating_max_duration_minutes <= 3000:
-            raise ValueError("gating_max_duration_minutes must be 0-3000")
-        if not 10 <= std_initial <= 5000:
-            raise ValueError("std_initial must be 10-5000")
-        if not 1 <= gain_factor <= 1000:
-            raise ValueError("gain_factor must be 1-1000")
-
-        data = [
-            index_offset,
-            learning_time_offset_hours,
-            learning_time_gain_hours,
-            gating_max_duration_minutes,
-            std_initial,
-            gain_factor,
-        ]
-        self._write_command(_VOC_TUNING, data=data, execution_time=_TIME_STANDARD)
-
-    @property
-    def nox_algorithm(self) -> Dict[str, int]:
-        """NOx algorithm tuning parameters
-
-        Returns:
-            dict: Current NOx algorithm parameters
-        """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot read NOx tuning while measuring. Call stop_measurement() first."
-            )
-
-        self._write_command(_NOX_TUNING)
-        data = self._read_data(6, execution_time=_TIME_STANDARD)
-
-        return {
-            "index_offset": data[0],
-            "learning_time_offset_hours": data[1],
-            "learning_time_gain_hours": data[2],  # No effect for NOx
-            "gating_max_duration_minutes": data[3],
-            "std_initial": data[4],  # No effect for NOx
-            "gain_factor": data[5],
-        }
-
-    def nox_algorithm_tuning(
-        self,
-        index_offset: int = 1,
-        learning_time_offset_hours: int = 12,
-        gating_max_duration_minutes: int = 720,
-        gain_factor: int = 230,
-    ) -> None:
-        """NOx algorithm tuning parameters
-
-        Args:
-            index_offset: NOx index for average conditions (1-250, default: 1)
-            learning_time_offset_hours: Time constant for offset learning (1-1000, default: 12)
-            gating_max_duration_minutes: Max gating duration (0-3000, default: 720, 0=disabled)
-            gain_factor: Output gain factor (1-1000, default: 230)
-
-        Note: learning_time_gain_hours is fixed at 12, std_initial is fixed at 50 for NOx.
-        Configuration is volatile and reset to defaults after power cycle.
-        """
-        if self._measurement_started:
-            raise RuntimeError(
-                "Cannot set NOx tuning while measuring. Call stop_measurement() first."
-            )
-
-        # Validate ranges
-        if not 1 <= index_offset <= 250:
-            raise ValueError("index_offset must be 1-250")
-        if not 1 <= learning_time_offset_hours <= 1000:
-            raise ValueError("learning_time_offset_hours must be 1-1000")
-        if not 0 <= gating_max_duration_minutes <= 3000:
-            raise ValueError("gating_max_duration_minutes must be 0-3000")
-        if not 1 <= gain_factor <= 1000:
-            raise ValueError("gain_factor must be 1-1000")
-
-        # Fixed parameters for NOx
-        learning_time_gain_hours = 12  # Must be 12 for NOx
-        std_initial = 50  # Must be 50 for NOx
-
-        data = [
-            index_offset,
-            learning_time_offset_hours,
-            learning_time_gain_hours,
-            gating_max_duration_minutes,
-            std_initial,
-            gain_factor,
-        ]
-        self._write_command(_NOX_TUNING, data=data, execution_time=_TIME_STANDARD)
-
-
-class SEN63C(SEN6x):
+class SEN63C(CO2Mixin, SEN6x):
     """Driver for SEN63C sensor - measures PM, CO2, RH, and Temperature
 
     Note: The CO2 sensor requires a 24-second conditioning period after starting
     a measurement. During this time, CO2 values will be reported as unknown (None).
     """
 
-    def all_measurements(self) -> Dict[str, Optional[float]]:
-        """All measurement values from SEN63C
+    _MEASUREMENT_COMMAND = _SEN63C_READ_MEASUREMENT
+    _MEASUREMENT_FIELDS = _PM_RHT_FIELDS + _CO2_INT16_FIELDS
+    _RAW_VALUES_COMMAND = _SEN62_SEN63C_READ_RAW_VALUES
+    _RAW_VALUES_FIELDS = _RAW_RHT_FIELDS
+    _SHT_HEATER_POLL_FIRMWARE = (5, 0)
+    _CO2_CONDITIONING_TIME = 24
 
-        Must be called when sensor is in measurement mode and data is ready.
-        Note: CO2 values will be unknown (None) for the first 22-24 seconds
-        after starting a measurement due to CO2 sensor conditioning.
 
-        Returns:
-            dict:
-                - pm1_0: PM1.0 concentration (µg/m³) or None if unknown
-                - pm2_5: PM2.5 concentration (µg/m³) or None if unknown
-                - pm4_0: PM4.0 concentration (µg/m³) or None if unknown
-                - pm10: PM10 concentration (µg/m³) or None if unknown
-                - humidity: Relative humidity (%) or None if unknown
-                - temperature: Temperature (°C) or None if unknown
-                - co2: CO2 concentration (ppm) or None if unknown
+class SEN65(VOCNOxMixin, SEN6x):
+    """Driver for SEN65 sensor - measures PM, VOC, NOx, RH, and Temperature"""
 
-        Raises:
-            RuntimeError: If sensor is not in measurement mode
-        """
-        if not self._measurement_started:
-            raise RuntimeError(
-                "Sensor must be in measurement mode. Call start_measurement() first."
-            )
+    _MEASUREMENT_COMMAND = _SEN65_READ_MEASUREMENT
+    _MEASUREMENT_FIELDS = _PM_RHT_FIELDS + _VOC_NOX_FIELDS
+    _RAW_VALUES_COMMAND = _SEN65_SEN68_SEN69C_READ_RAW_VALUES
+    _RAW_VALUES_FIELDS = _RAW_RHT_FIELDS + _RAW_VOC_NOX_FIELDS
+    _SHT_HEATER_POLL_FIRMWARE = (5, 0)
 
-        self._write_command(_SEN63C_READ_MEASUREMENT)
 
-        # SEN63C returns 7 values (7 words): PM1.0, PM2.5, PM4.0, PM10, RH, T, CO2
-        data = self._read_data(7, execution_time=_TIME_READ_MEASUREMENT)
+class SEN66(VOCNOxMixin, CO2Mixin, SEN6x):
+    """Driver for SEN66 sensor - measures PM, VOC, NOx, CO2, RH, and Temperature"""
 
-        # Scale factors from datasheet
-        pm_scale = 10.0
-        temp_scale = 200.0
-        humidity_scale = 100.0
+    _MEASUREMENT_COMMAND = _SEN66_READ_MEASUREMENT
+    _MEASUREMENT_FIELDS = _PM_RHT_FIELDS + _VOC_NOX_FIELDS + _CO2_UINT16_FIELDS
+    _RAW_VALUES_COMMAND = _SEN66_READ_RAW_VALUES
+    _RAW_VALUES_FIELDS = _RAW_RHT_FIELDS + _RAW_VOC_NOX_FIELDS + _RAW_CO2_FIELDS
+    _SHT_HEATER_POLL_FIRMWARE = (4, 0)
 
-        # Track measurement time for startup detection
-        if self._measurement_time is None:
-            self._measurement_time = time.monotonic()
 
-        # Process PM values (uint16, 0xFFFF = unknown)
-        pm1_0: Optional[float] = None if data[0] == _UNKNOWN_VALUE else data[0] / pm_scale
-        pm2_5: Optional[float] = None if data[1] == _UNKNOWN_VALUE else data[1] / pm_scale
-        pm4_0: Optional[float] = None if data[2] == _UNKNOWN_VALUE else data[2] / pm_scale
-        pm10: Optional[float] = None if data[3] == _UNKNOWN_VALUE else data[3] / pm_scale
+class SEN68(VOCNOxMixin, FormaldehydeMixin, SEN6x):
+    """Driver for SEN68 sensor - measures PM, VOC, NOx, HCHO, RH, and Temperature"""
 
-        # Process RH&T values (int16, 0x7FFF = unknown)
-        humidity: Optional[float] = None if data[4] == _UNKNOWN_VALUE else data[4] / humidity_scale
-        temperature: Optional[float] = None if data[5] == _UNKNOWN_VALUE else data[5] / temp_scale
+    _MEASUREMENT_COMMAND = _SEN68_READ_MEASUREMENT
+    _MEASUREMENT_FIELDS = _PM_RHT_FIELDS + _VOC_NOX_FIELDS + _HCHO_FIELDS
+    _RAW_VALUES_COMMAND = _SEN65_SEN68_SEN69C_READ_RAW_VALUES
+    _RAW_VALUES_FIELDS = _RAW_RHT_FIELDS + _RAW_VOC_NOX_FIELDS
+    _SHT_HEATER_POLL_FIRMWARE = (7, 0)
 
-        # Process CO2 (int16, 0x7FFF = unknown during first 22-24s)
-        co2: Optional[float] = None if data[6] == 0x7FFF else float(data[6])
 
-        self._measurement_data = {
-            "pm1_0": pm1_0,
-            "pm2_5": pm2_5,
-            "pm4_0": pm4_0,
-            "pm10": pm10,
-            "humidity": humidity,
-            "temperature": temperature,
-            "co2": co2,
-        }
+class SEN69C(VOCNOxMixin, FormaldehydeMixin, CO2Mixin, SEN6x):
+    """Driver for SEN69C sensor - measures PM, VOC, NOx, HCHO, CO2, RH, and Temperature
 
-        return self._measurement_data
+    Note: The CO2 sensor requires a 24-second conditioning period after starting
+    a measurement. During this time, CO2 values will be reported as unknown (None).
+    """
 
-    def raw_values(self) -> Dict[str, Optional[float]]:
-        """Raw sensor values from SEN63C
-
-        Returns:
-            dict:
-                - raw_humidity: Raw humidity (%) or None if unknown
-                - raw_temperature: Raw temperature (°C) or None if unknown
-        """
-        if not self._measurement_started:
-            raise RuntimeError(
-                "Sensor must be in measurement mode. Call start_measurement() first."
-            )
-
-        self._write_command(_SEN63C_READ_RAW_VALUES)
-        data = self._read_data(2, execution_time=_TIME_READ_MEASUREMENT)
-
-        temp_scale = 200.0
-        humidity_scale = 100.0
-
-        return {
-            "raw_humidity": None if data[0] == 0x7FFF else data[0] / humidity_scale,
-            "raw_temperature": None if data[1] == 0x7FFF else data[1] / temp_scale,
-        }
+    _MEASUREMENT_COMMAND = _SEN69C_READ_MEASUREMENT
+    _MEASUREMENT_FIELDS = _PM_RHT_FIELDS + _VOC_NOX_FIELDS + _HCHO_FIELDS + _CO2_INT16_FIELDS
+    _RAW_VALUES_COMMAND = _SEN65_SEN68_SEN69C_READ_RAW_VALUES
+    _RAW_VALUES_FIELDS = _RAW_RHT_FIELDS + _RAW_VOC_NOX_FIELDS
+    _SHT_HEATER_POLL_FIRMWARE = (9, 0)
+    _CO2_CONDITIONING_TIME = 24
