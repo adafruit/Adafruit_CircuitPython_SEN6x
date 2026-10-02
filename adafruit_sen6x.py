@@ -698,6 +698,7 @@ class SEN6x(_SEN6xBase):  # noqa: PLR0904
         self._serial_number = None
         self._product_name = None
         self._measurement_data = None
+        self._measurement_start_time = None
         # Wait for sensor to restart
         time.sleep(_SENSOR_STARTUP_TIME)
 
@@ -1446,6 +1447,7 @@ class SEN60(_SEN6xBase):
         self._measurement_started = False
         self._serial_number = None
         self._measurement_data = None
+        self._measurement_start_time = None
         # Wait for sensor to restart
         time.sleep(_SENSOR_STARTUP_TIME)
 
@@ -1454,6 +1456,8 @@ class SEN60(_SEN6xBase):
         """The sensor serial number as a 12-digit hexadecimal string
 
         Can only be read from the sensor in idle mode, the value is cached afterwards.
+        (The datasheet command description says idle mode only, although its
+        command overview table lists it as available during measurement.)
         """
         if self._serial_number is None:
             self._require_idle("read serial number")
@@ -1486,7 +1490,8 @@ class SEN60(_SEN6xBase):
         """All measurement values from SEN60
 
         The SEN60 only returns each measurement once and NACKs further reads until
-        new data is available. In that case the previously read values are returned.
+        new data is available, so :attr:`data_ready` is checked first and the
+        previously read values are returned if there is no new data.
 
         Returns:
             dict:
@@ -1498,12 +1503,10 @@ class SEN60(_SEN6xBase):
             RuntimeError: If sensor is not in measurement mode
             OSError: If no measurement has been read yet and none is available
         """
-        try:
-            return super().all_measurements()
-        except OSError:
-            if self._measurement_data is None:
-                raise
+        self._require_measuring()
+        if self._measurement_data is not None and not self.data_ready:
             return self._measurement_data
+        return super().all_measurements()
 
     def number_concentration(self) -> Dict[str, Optional[float]]:
         """Particle number concentration values
